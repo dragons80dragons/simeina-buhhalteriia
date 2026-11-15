@@ -6,6 +6,6 @@
 - `android/` — Android-оболонка: відкриває вебзастосунок, автоматично записує оплати з push-сповіщень Приват24, ставить системні нагадування, перевіряє оновлення.
 
 ## Встановлення на Android
-Завантажити останню версію: https://github.com/dragons80dragons/simeina-buhhalteriia/releases/latest/download/simeina-buhhalteriia.apk
+Завантажити останню версію: https://raw.githubusercontent.com/dragons80dragons/simeina-buhhalteriia/main/dist/simeina-buhhalteriia.apk
 
 Дані сім'ї, ключ сім'ї та ключ підпису застосунку в цьому репозиторії не зберігаються.
