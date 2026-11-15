@@ -1,2 +1,11 @@
-# simeina-buhhalteriia
-Simeina buhhalteriia - family budget app (Android)
+# Сімейна бухгалтерія
+
+Застосунок для сімейного бюджету: прибутки, витрати з круговою діаграмою, матрац (₴ / $ / €), списки «Купити / Зробити / Заплановано».
+
+- `web/` — вебзастосунок (Firebase Hosting + Firestore), https://pributky.web.app
+- `android/` — Android-оболонка: відкриває вебзастосунок, автоматично записує оплати з push-сповіщень Приват24, ставить системні нагадування, перевіряє оновлення.
+
+## Встановлення на Android
+Завантажити останню версію: https://github.com/dragons80dragons/simeina-buhhalteriia/releases/latest/download/simeina-buhhalteriia.apk
+
+Дані сім'ї, ключ сім'ї та ключ підпису застосунку в цьому репозиторії не зберігаються.
