@@ -1,0 +1,25 @@
+plugins { id 'com.android.application' }
+def vcode = (project.findProperty('vcode') ?: '1') as int
+def vname = (project.findProperty('vname') ?: '1.0') as String
+android {
+    namespace 'ua.family.buh'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'ua.family.buh'
+        minSdk 26
+        targetSdk 34
+        versionCode vcode
+        versionName vname
+    }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('SB_KEYSTORE') ?: '../keystore/release.jks')
+            storePassword System.getenv('SB_KS_PASS')
+            keyAlias 'buh'
+            keyPassword System.getenv('SB_KS_PASS')
+        }
+    }
+    buildTypes { release { minifyEnabled false; signingConfig signingConfigs.release } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    buildFeatures { buildConfig true }
+}
