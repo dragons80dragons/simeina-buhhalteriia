@@ -21,7 +21,21 @@ const $app = document.getElementById('app');
 const $sheet = document.getElementById('sheet');
 
 if (!fid) {
-  $app.innerHTML = '<div class="empty">Відкрийте застосунок за своїм посиланням один раз — далі він працюватиме з іконки.</div>';
+  // Перший запуск: вставити своє посилання (або ключ сім'ї) і вибрати, чий це телефон
+  $app.innerHTML = '<div class="list" style="padding-top:40px"><section class="card"><h2>Вхід у «Сімейну бухгалтерію»</h2>' +
+    '<label class="f">Своє посилання або ключ сім\'ї<input id="jf" class="note" placeholder="https://pributky.web.app/?f=…" autocomplete="off"></label>' +
+    '<div class="f">Чий це телефон?<div class="sign three" style="grid-template-columns:1fr 1fr"><button type="button" data-w="s">Сергій</button><button type="button" data-w="d">Даша</button></div></div>' +
+    '<div class="small muted" id="jerr"></div><button class="btn big" id="jgo">Увійти</button></section></div>';
+  let jw = '';
+  $app.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { jw = b.dataset.w; $app.querySelectorAll('[data-w]').forEach(z => z.className = z === b ? 'on ' + jw : ''); });
+  document.getElementById('jgo').onclick = () => {
+    const v = document.getElementById('jf').value.trim();
+    let f = '', w = jw;
+    try { const u = new URL(v); f = u.searchParams.get('f') || ''; w = w || u.searchParams.get('me') || ''; } catch (e) { f = v; }
+    if (!/^[A-Za-z0-9]{24,}$/.test(f)) { document.getElementById('jerr').textContent = 'Не схоже на посилання сім\'ї — встав повністю.'; return; }
+    if (w !== 's' && w !== 'd') { document.getElementById('jerr').textContent = 'Вибери, чий це телефон.'; return; }
+    location.href = location.pathname + '?f=' + f + '&me=' + w;
+  };
   throw new Error('no family id');
 }
 
