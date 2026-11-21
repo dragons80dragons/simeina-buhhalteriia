@@ -649,33 +649,67 @@ const MORE_STORES = [
   [/OLX|PROM\.UA|EPICENTRK|ALIEXPRESS|TEMU|KTC|КТЦ|ITBOX|COMPX/, 'comp'],
   [/МАРКЕТ|MARKET|MAGAZYN|МАГАЗИН|ПРОДУКТ|PRODUKT|СУПЕРМАРКЕТ|SUPERMARKET|ГАСТРОНОМ|ПЕКАРН|BAKERY|М'ЯСО|МЯСО|ОВОЧ|РИНОК|BAZAR/, 'food']
 ];
+// Категорії, які пише сам Приват24 у сповіщенні («-566.8₴ Супермаркети…») → наші статті
+const PRIVAT_CATS = [
+  [/СУПЕРМАРКЕТ|ПРОДУКТ|БАКАЛ|М'ЯС|ОВОЧ|ХЛІБ|ПЕКАР|ГАСТРОНОМ/, 'food'],
+  [/РЕСТОРАН|КАФЕ|ФАСТФУД|ФАСТ-ФУД|БАР|КАВ|ДОСТАВК[АИ] ЇЖІ/, 'cafe'],
+  [/ТАКСІ|ТРАНСПОРТ|АЗС|ПАЛЬН|ПАРКУВ|АВТО|ПРОЇЗД|ЗАЛІЗНИЦ|АВІА/, 'transport'],
+  [/АПТЕК|МЕДИЦ|ЛІКАР|СТОМАТ|ЗДОРОВ/, 'health'],
+  [/ОДЯГ|ВЗУТТ|АКСЕСУАР/, 'clothes'],
+  [/КОМУНАЛ|ЗВ'ЯЗОК|МОБІЛЬН|ІНТЕРНЕТ|ТЕЛЕБАЧ|ПІДПИСК/, 'utils'],
+  [/ІГРАШК|РОЗВАГ|КІНО|ДОЗВІЛЛ/, 'toys'],
+  [/КРАС|САЛОН|КОСМЕТ|ПЕРУКАР/, 'beauty'],
+  [/ЕЛЕКТРОН|ТЕХНІК|КОМП'ЮТЕР|ГАДЖЕТ/, 'comp'],
+  [/ОСВІТ|НАВЧАН|КНИГ|КАНЦ/, 'kids'],
+  [/ДІМ|ГОСПОДАР|БУДІВЕЛ|МЕБЛ|ТОВАРИ ДЛЯ ДОМУ/, 'home']
+];
+const tidyShop = z => z.replace(/\b(KASA|KACA|КАСА|POS|TERMINAL)\s*\d*\b/gi, '').replace(/[*_]+/g, ' ').replace(/\s+/g, ' ').trim()
+  .split(' ').map(w => w.length > 2 && w === w.toUpperCase() ? w[0] + w.slice(1).toLowerCase() : w).join(' ');
+function catByShop(t) {
+  const U = t.toUpperCase(), up = t.toUpperCase().replace(/[ABCEHKMOPTXIY]/g, ch => LAT[ch] || ch);
+  for (const [r2, name, c] of STORES) if (r2.test(up) || r2.test(U)) return { cat: c, store: name };
+  for (const [r2, c] of MORE_STORES) if (r2.test(U)) return { cat: c, store: '' };
+  return { cat: '', store: '' };
+}
+const AMT = /(?<![\dA-Za-zА-Яа-яІіЇїЄєҐґ])([+\-−]?)\s*(\d{1,3}(?:[\s ]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(UAH|ГРН|₴)/gi;
 function parseBankPush(text) {
   const raw = String(text || '').replace(/\s+/g, ' ').trim();
   const U = raw.toUpperCase();
   if (!raw || /ТЕСТ АВТОЗАПИСУ/.test(U)) return { test: true };
-  if (/ЗАРАХУВАН|ПОПОВНЕН|НАДХОДЖЕН|ПЕРЕКАЗ ВІД|ПОВЕРНЕНН|ВІДМОВ|НЕВДАЛ|ВІДХИЛЕН|КОД ПІДТВЕРДЖ|ПАРОЛ|OTP|КЕШБЕК|CASHBACK|ПЕРЕКАЗ НА КАРТ|ПЕРЕКАЗ З КАРТ|ПЕРЕКАЗ\b/.test(U)) return null;
-  // сума: перша, що не є балансом
-  let amount = 0;
-  const re = /(?<![\dA-Za-zА-Яа-яІіЇїЄєҐґ])(\d{1,3}(?:[\s\u00a0]\d{3})+[.,]\d{1,2}|\d+(?:[.,]\d{1,2})?)\s*(UAH|ГРН|₴)/gi; let m;
-  while ((m = re.exec(raw))) {
+  if (/ЗАРАХУВАН|ПОПОВНЕН|НАДХОДЖЕН|ПЕРЕКАЗ|ПОВЕРНЕНН|ВІДМОВ|НЕВДАЛ|ВІДХИЛЕН|КОД ПІДТВЕРДЖ|ПАРОЛ|OTP|КЕШБЕК|CASHBACK|REFUND/.test(U)) return null;
+  // 1) Google Гаманець: «SRIBLIANKA KASA 1 566,80 грн – Visa PrivatBank ••1043»
+  const tail = '\\s*(?:грн|UAH|₴)\\s*[–—-]\\s*(?:Visa|Master\\s?card|Maestro|Мастеркард|Віза)';
+  const t1 = String(text || '').replace(/[\r\n]+/g, ' ').trim();
+  // у Гаманці тисячі відділяються нерозривним пробілом — шукаємо спершу так
+  let w = t1.match(new RegExp('^(.+?)\\s(\\d{1,3}(?:[\\u00a0\\u202f]\\d{3})+(?:[.,]\\d{1,2})?)' + tail, 'i'));
+  if (!w) {
+    w = raw.match(new RegExp('^(.+?)\\s+(\\d{1,3}(?:\\s\\d{3})*(?:[.,]\\d{1,2})?)' + tail, 'i'));
+    if (w && /(KASA|KACA|КАСА|POS|№|#|TERMINAL)\s*\d*\s*$/i.test(w[1] + ' ' + w[2].split(/\s/)[0])) w = raw.match(new RegExp('^(.+)\\s+(\\d+(?:[.,]\\d{1,2})?)' + tail, 'i'));
+  }
+  if (w) {
+    const amount = parseFloat(w[2].replace(/[\s ]/g, '').replace(',', '.'));
+    const shop = tidyShop(w[1]), c = catByShop(w[1]);
+    return amount > 0 ? { amount: Math.round(amount * 100) / 100, cat: c.cat || 'other', catSure: !!c.cat, note: shop || c.store || 'Оплата карткою', src: 'wallet' } : null;
+  }
+  // 2) Приват24: «-566.8₴ Супермаркети. Сільпо…» або «Оплата 245.50UAH. ATB…»
+  let amount = 0, sign = '', m; AMT.lastIndex = 0;
+  while ((m = AMT.exec(raw))) {
     const before = raw.slice(Math.max(0, m.index - 14), m.index).toUpperCase();
     if (/БАЛ|ДОСТУП|ЗАЛИШ|ЛІМІТ|КРЕДИТ/.test(before)) continue;
-    amount = parseFloat(m[1].replace(/[\s ]/g, '').replace(',', '.')); break;
+    sign = m[1]; amount = parseFloat(m[2].replace(/[\s ]/g, '').replace(',', '.')); break;
   }
-  if (!(amount > 0)) return null;
-  if (!/ОПЛАТ|ПОКУПК|СПИСАН|PURCHASE|PAYMENT|POS|ТРАНЗАКЦ|UAH|ГРН/.test(U)) return null;
-  // магазин
-  const up = l => l.toUpperCase().replace(/[ABCEHKMOPTXIY]/g, ch => LAT[ch] || ch);
-  let cat = '', store = '';
-  for (const [r2, name, c] of STORES) if (r2.test(up(raw)) || r2.test(U)) { cat = c; store = name; break; }
-  if (!cat) for (const [r2, c] of MORE_STORES) if (r2.test(U)) { cat = c; break; }
-  let rest = raw.replace(/(БАЛ\.?|БАЛАНС|ДОСТУПНО|ЗАЛИШОК)[^]*$/i, '')
-    .replace(/(\d[\d\s ]*[.,]\d{1,2}|\d+)\s*(UAH|ГРН|₴)/gi, ' ')
-    .replace(/\*\d{2,4}|\d{2}[.:]\d{2}([.:]\d{2,4})?|ПРИВАТ24|PRIVAT24|ПРИВАТБАНК|КАРТК[АИ]|ОПЛАТА|ПОКУПКА|СПИСАННЯ|УСПІШН\w*|ЧЕРЕЗ|GOOGLE PAY|APPLE PAY|NFC|ВАША|З КАРТИ|КАРТИ/gi, ' ');
-  const parts = rest.split(/[.,;:|\n]/).map(z => z.replace(/\s+/g, ' ').trim()).filter(z => (z.match(/[A-Za-zА-Яа-яІіЇїЄєҐґ]/g) || []).length >= 3);
-  const shop = (parts.sort((a, b) => b.length - a.length)[0] || '').slice(0, 40);
-  const note = (store && !shop.toUpperCase().includes(store.toUpperCase()) ? store + ' · ' : '') + (shop || store || 'Оплата карткою');
-  return { amount: Math.round(amount * 100) / 100, cat: cat || 'other', note };
+  if (!(amount > 0) || sign === '+') return null;
+  if (!sign && !/ОПЛАТ|ПОКУПК|СПИСАН|PURCHASE|PAYMENT|POS|ТРАНЗАКЦ/.test(U)) return null;
+  const rest = raw.replace(/(БАЛ\.?|БАЛАНС|ДОСТУПНО|ЗАЛИШОК)[^]*$/i, '').replace(AMT, ' ')
+    .replace(/\*\d{2,4}|••\d{4}|\d{2}[.:]\d{2}([.:]\d{2,4})?|PRIVAT24:?|ПРИВАТ24:?|ПРИВАТБАНК|PRIVATBANK|КАРТК[АИ]|ОПЛАТА|ПОКУПКА|СПИСАННЯ|УСПІШН\w*|ЧЕРЕЗ|GOOGLE PAY|APPLE PAY|NFC|З КАРТИ|КАРТИ/gi, ' ');
+  const parts = rest.split(/[.;:|\n]/).map(z => z.replace(/\s+/g, ' ').trim()).filter(z => (z.match(/[A-Za-zА-Яа-яІіЇїЄєҐґ]/g) || []).length >= 3);
+  let cat = '', catWord = '';
+  for (const p2 of parts) { for (const [r2, c] of PRIVAT_CATS) if (r2.test(p2.toUpperCase())) { cat = c; catWord = p2; break; } if (cat) break; }
+  const shopPart = parts.find(z => z !== catWord) || '';
+  const c2 = catByShop(raw);
+  if (!cat) cat = c2.cat;
+  const note = tidyShop(shopPart) || c2.store || catWord || 'Оплата карткою';
+  return { amount: Math.round(amount * 100) / 100, cat: cat || 'other', catSure: !!cat, note: note.slice(0, 40), src: 'privat' };
 }
 const handledInbox = new Set();
 let unsubInbox = null;
@@ -683,7 +717,12 @@ function subscribeInbox() {
   if (unsubInbox) unsubInbox();
   unsubInbox = onSnapshot(collection(db, 'families', fid, 'inbox'), qs => qs.docs.forEach(d => handleInbox(d.id, d.data())), () => {});
 }
-async function handleInbox(id, x) {
+// Одна оплата приходить двічі (Google Гаманець + Приват24) — зводимо в один запис:
+// назва магазину з Гаманця, стаття — з категорії Привату
+const recentAuto = [];
+let inboxChain = Promise.resolve();
+function handleInbox(id, x) { inboxChain = inboxChain.then(() => handleInbox1(id, x)).catch(() => {}); }
+async function handleInbox1(id, x) {
   if (handledInbox.has(id)) return; handledInbox.add(id);
   let at = num(x.at); at = at > 1e12 ? at : at > 1e9 ? at * 1000 : Date.now();
   const who = x.who === 'd' ? 'd' : 's', r = parseBankPush(x.text);
@@ -691,8 +730,21 @@ async function handleInbox(id, x) {
     if (r && r.test) { if (who === me) toast('✅ Автозапис працює: запис дійшов до застосунку'); }
     else if (r) {
       const d = new Date(at), m = d.getFullYear() + '-' + pad(d.getMonth() + 1);
-      await setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['a' + id]: { who, cat: r.cat, amount: String(r.amount), note: r.note, at, auto: true } } }, { merge: true });
-      if (who === me) toast('⚡ Записано: ' + fmt(r.amount) + ' · ' + r.note + ' → ' + CAT[r.cat].name);
+      const pool = recentAuto.concat(Object.entries((mdata(m).exp) || {}).map(([eid, e]) => ({ m, id: eid, ...e })));
+      const twin = pool.find(e => e.auto && e.who === who && e.src && e.src !== r.src && Math.abs(num(e.amount) - r.amount) < 0.01 && Math.abs((e.at || 0) - at) < 10 * 60000);
+      if (twin) {
+        const patch = {};
+        if (r.src === 'wallet') { patch.note = r.note; if (!twin.catSure && r.catSure) patch.cat = r.cat; }
+        if (r.src === 'privat' && r.catSure) patch.cat = r.cat;
+        patch.src = 'both'; patch.catSure = !!(twin.catSure || r.catSure);
+        Object.assign(twin, patch);
+        await setDoc(doc(db, 'families', fid, 'months', twin.m), { exp: { [twin.id]: patch } }, { merge: true });
+      } else {
+        const e = { who, cat: r.cat, amount: String(r.amount), note: r.note, at, auto: true, src: r.src, catSure: r.catSure };
+        recentAuto.push({ m, id: 'a' + id, ...e }); if (recentAuto.length > 50) recentAuto.shift();
+        await setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['a' + id]: e } }, { merge: true });
+        if (who === me) toast('⚡ Записано: ' + fmt(r.amount) + ' · ' + r.note + ' → ' + CAT[r.cat].name);
+      }
     }
     await deleteDoc(doc(db, 'families', fid, 'inbox', id));
   } catch (e) { handledInbox.delete(id); }

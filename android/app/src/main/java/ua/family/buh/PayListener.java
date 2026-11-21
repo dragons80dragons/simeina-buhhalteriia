@@ -8,7 +8,7 @@ import android.service.notification.StatusBarNotification;
 /** Ловить сповіщення банківських застосунків і передає їх текст у «Сімейну бухгалтерію». */
 public class PayListener extends NotificationListenerService {
     static boolean isBank(String pkg) {
-        return pkg.startsWith("ua.privatbank") || pkg.equals("com.ftband.mono");
+        return pkg.startsWith("ua.privatbank") || pkg.equals("com.ftband.mono") || pkg.equals("com.google.android.apps.walletnfcrel") || pkg.equals("com.google.android.gms");
     }
 
     @Override public void onListenerConnected() {
@@ -27,6 +27,8 @@ public class PayListener extends NotificationListenerService {
             CharSequence txt = e.getCharSequence(Notification.EXTRA_TEXT);
             String text = ((title != null ? title + " " : "") + (big != null ? big : txt != null ? txt : "")).trim();
             if (text.isEmpty()) return;
+            // від Google Гаманця беремо лише сповіщення з сумою в гривнях
+            if (pkg.startsWith("com.google") && !text.matches("(?s).*(грн|UAH|₴).*")) return;
             if (Store.seen(this, pkg + "|" + text)) return;   // те саме сповіщення оновилось — не дублюємо
             long at = sbn.getPostTime() / 1000;
             Store.remember(this, pkg, text, sbn.getPostTime());
