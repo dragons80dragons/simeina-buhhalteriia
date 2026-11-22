@@ -212,3 +212,19 @@ input.cin{font-weight:700}
 .nrow.ok .nst{background:#1E9E4A}.nrow.bad .nst{background:#D41F23}
 .nrow .sc{flex:1;display:flex;flex-direction:column;gap:2px}.nrow .sc small{font-size:12px;color:#5B6660}
 .nrow .btn{flex:none}
+/* --- голосовий запис --- */
+.vhead{display:flex;align-items:center;gap:12px}
+.vhead .si{font-size:24px}.vhead .sc{flex:1;display:flex;flex-direction:column;gap:2px}.vhead .sc small{font-size:12px;color:#5B6660}
+.tgl{width:54px;height:32px;border-radius:16px;border:none;background:#C9CDC6;position:relative;flex:none;padding:0;transition:background .2s}
+.tgl i{position:absolute;left:3px;top:3px;width:26px;height:26px;border-radius:13px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .2s}
+.tgl.on{background:#139A3D}.tgl.on i{left:25px}.tgl:disabled{opacity:.4}
+.vov{position:fixed;inset:0;z-index:100;background:rgba(10,14,12,.72);display:flex;align-items:flex-end;justify-content:center}
+.vbox{background:#fff;width:100%;max-width:480px;border-radius:24px 24px 0 0;padding:28px 18px max(22px,env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center}
+.vmic{width:96px;height:96px;border-radius:48px;background:#D41F23;display:flex;align-items:center;justify-content:center;font-size:42px;box-shadow:0 0 0 0 rgba(212,31,35,.5)}
+.vov.live .vmic{animation:vpulse 1.2s infinite}
+@keyframes vpulse{0%{box-shadow:0 0 0 0 rgba(212,31,35,.55)}70%{box-shadow:0 0 0 26px rgba(212,31,35,0)}100%{box-shadow:0 0 0 0 rgba(212,31,35,0)}}
+.vst{font-size:17px;font-weight:700;color:#D41F23}
+.vtx{font-size:20px;font-weight:600;min-height:28px;color:#17201B}
+.vhint{font-size:12px;color:#5B6660}
+.vbox .grid2{width:100%}
+.tabs button[data-tab=exp]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}

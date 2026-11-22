@@ -75,7 +75,7 @@ const CATS = [
   ['comp', 'Комп\'ютери і запчастини', '#3A3F4B'],
   ['distill', 'Хобі — дистиляція', '#B07C1E'],
   ['beauty', 'Салони краси і тюнінг', '#00A3B8'],
-  ['other', 'Інше', '#9AA19C']
+  ['other', 'Різне', '#9AA19C']
 ];
 const CAT = Object.fromEntries(CATS.map(([id, name, color, ink]) => [id, { id, name, color, ink: ink || '#fff' }]));
 const WHO_C = { s: '#3E6FA3', d: '#D45F92' };
@@ -211,7 +211,7 @@ function render() {
   if (st.screen === 'stash') { $app.innerHTML = renderStash(); updStashForm(); return; }
   if (st.screen === 'expdetails') {
     const rows = expList().map(x => '<button class="erow ' + (x.who === 'd' ? 'byd' : 'bys') + '" data-exp="' + esc(x.id) + '"><span class="cdot" style="background:' + CAT[x.cat].color + '"></span>' +
-      '<span class="et"><b>' + (esc(x.note) || esc(CAT[x.cat].name)) + '</b><small>' + esc(CAT[x.cat].name) + ' · ' + dateStr(x.at) + ' · ' + (x.who === 'd' ? 'Даша' : 'Сергій') + (x.auto ? ' · ⚡ авто' : '') + '</small></span>' +
+      '<span class="et"><b>' + (esc(x.note) || esc(CAT[x.cat].name)) + '</b><small>' + esc(CAT[x.cat].name) + ' · ' + dateStr(x.at) + ' · ' + (x.who === 'd' ? 'Даша' : 'Сергій') + (x.auto ? ' · ⚡ авто' : x.voice ? ' · 🎤 голос' : '') + '</small></span>' +
       '<span class="ev num">' + fmt(num(x.amount)) + '</span></button>').join('');
     $app.innerHTML =
       '<div class="top" style="justify-content:flex-start;gap:4px"><button class="back" data-act="back" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>' +
@@ -352,7 +352,7 @@ function renderExp(mword) {
     (legend || '<div class="muted small" style="text-align:center">Витрат ще немає</div>') + '</section>' +
     '<section class="card pair"><div class="pl"><h2>Записи</h2><div class="num" style="font-size:22px;font-weight:700">' + fmt(total) + '</div><div class="small muted">' + nword + '</div></div>' +
     '<div class="pb"><button class="btn" data-act="expdetails">Подробиці</button></div></section>' +
-    '<button class="card autobtn" data-act="autoset"><span class="si">⚡</span><span class="sc"><b>Автозапис оплат карткою</b><small>' + (NATIVE ? (window.Android.notifAccess() ? 'увімкнено на цьому телефоні' : 'потрібно увімкнути на цьому телефоні') : 'оплата Приватом сама потрапляє у витрати') + '</small></span><span class="chev">›</span></button>' +
+    '<button class="card autobtn" data-act="autoset"><span class="si">⚙️</span><span class="sc"><b>Налаштування автозапису витрат</b><small>' + (NATIVE ? (window.Android.notifAccess() ? 'увімкнено на цьому телефоні' : 'потрібно увімкнути на цьому телефоні') : 'оплата Приватом сама потрапляє у витрати') + '</small></span><span class="chev">›</span></button>' +
     '<section class="card num"><div class="tot s"><span>Витратив Сергій</span><b>' + fmt(ts) + '</b></div>' +
     '<div class="tot d"><span>Витратила Даша</span><b>' + fmt(td) + '</b></div>' +
     carryBtn() +
@@ -761,18 +761,117 @@ async function autoTest(btn) {
   } catch (e) { btn.textContent = 'Немає інтернету'; }
   setTimeout(() => { btn.disabled = false; btn.textContent = 'Перевірити зв\'язок'; }, 3000);
 }
+// ---------- голосовий запис витрат ----------
+const voiceOn = () => ls.get('voice') === '1';
+const voiceSupported = () => NATIVE ? typeof window.Android.startVoice === 'function' : !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+function voiceSection() {
+  const ok = voiceSupported(), on = voiceOn() && ok;
+  return '<section class="card"><div class="vhead"><span class="si">🎤</span><span class="sc"><b>Голосовий запис витрат</b><small>' +
+    (ok ? 'Довго натисни вкладку «Витрачено» і скажи: спершу суму, потім на що. Запис іде в «Різне», статтю потім можна змінити.' : 'Потрібне оновлення застосунку — натисни «Перевірити оновлення застосунку» внизу.') +
+    '</small></span><button class="tgl' + (on ? ' on' : '') + '" data-act="vtoggle"' + (ok ? '' : ' disabled') + ' aria-label="Голосовий запис"><i></i></button></div>' +
+    (on ? '<button class="btn ghost" data-act="vtry" style="width:100%">Спробувати зараз</button>' : '') + '</section>';
+}
+const UNITS = { 'нуль': 0, 'один': 1, 'одна': 1, 'одну': 1, 'два': 2, 'дві': 2, 'три': 3, 'чотири': 4, "п'ять": 5, 'пять': 5, 'шість': 6, 'сім': 7, 'вісім': 8, "дев'ять": 9, 'девять': 9,
+  'десять': 10, 'одинадцять': 11, 'дванадцять': 12, 'тринадцять': 13, 'чотирнадцять': 14, "п'ятнадцять": 15, 'пятнадцять': 15, 'шістнадцять': 16, 'сімнадцять': 17, 'вісімнадцять': 18, "дев'ятнадцять": 19, 'девятнадцять': 19,
+  'двадцять': 20, 'тридцять': 30, 'сорок': 40, "п'ятдесят": 50, 'пятдесят': 50, 'шістдесят': 60, 'сімдесят': 70, 'вісімдесят': 80, "дев'яносто": 90, 'девяносто': 90,
+  'сто': 100, 'двісті': 200, 'триста': 300, 'чотириста': 400, "п'ятсот": 500, 'пятсот': 500, 'шістсот': 600, 'сімсот': 700, 'вісімсот': 800, "дев'ятсот": 900, 'девятсот': 900, 'півтори': 1.5 };
+function parseVoice(text) {
+  const orig = String(text || '').replace(/[’ʼ`]/g, "'").replace(/(\d)\s+(?=\d{3}\b)/g, '$1').trim();
+  const t = orig.toLowerCase(), owords = orig.split(/\s+/), words = t.split(/\s+/);
+  let i = 0, amount = 0, got = false;
+  // цифрами: «250», «250,50», «1500 гривень 40 копійок»
+  const m = t.match(/^(?:мінус\s+)?(\d+(?:[.,]\d{1,2})?)/);
+  if (m) { amount = parseFloat(m[1].replace(',', '.')); got = true; i = 1; }
+  else {
+    let total = 0, cur = 0;
+    for (; i < words.length; i++) {
+      const w = words[i].replace(/[.,!?]/g, '');
+      if (w in UNITS) { cur += UNITS[w]; got = true; continue; }
+      if (/^тисяч/.test(w)) { total += (cur || 1) * 1000; cur = 0; got = true; continue; }
+      if (/^\d+$/.test(w)) { cur += +w; got = true; continue; }
+      if (w === 'і' || w === 'та') continue;
+      break;
+    }
+    amount = total + cur;
+  }
+  let rest = owords.slice(i);
+  if (rest.length && /^(грн|гривн[а-яіїєґ]*|гривень|₴|uah)[.,]?$/i.test(rest[0])) rest = rest.slice(1);
+  // копійки: «40 копійок»
+  const k = rest.join(' ').match(/^(\d{1,2}|[а-яіїєґ']+)\s+копі[а-яіїєґ]*\s*/i);
+  if (k) { const kv = /^\d/.test(k[1]) ? +k[1] : (UNITS[k[1].toLowerCase()] || 0); amount += kv / 100; rest = rest.join(' ').slice(k[0].length).split(/\s+/); }
+  let note = rest.join(' ').replace(/^(на|за)\s+/, '').trim();
+  note = note ? note[0].toUpperCase() + note.slice(1) : '';
+  return got && amount > 0 ? { amount: Math.round(amount * 100) / 100, note } : null;
+}
+let vrec = null, vText = '';
+function voiceUI(state, text) {
+  let ov = document.getElementById('vov');
+  if (state === 'close') { if (ov) ov.remove(); return; }
+  if (!ov) {
+    ov = document.createElement('div'); ov.id = 'vov'; ov.className = 'vov';
+    ov.innerHTML = '<div class="vbox"><div class="vmic"><span>🎤</span></div><div class="vst"></div><div class="vtx"></div><div class="vhint">Скажи суму, потім на що. Напр.: «250 гривень хліб і молоко»</div><div class="grid2"><button class="btn big ghost" data-v="cancel">Скасувати</button><button class="btn big" data-v="done">Готово</button></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (!b) return; if (b.dataset.v === 'cancel') voiceStop(true); else voiceStop(false); });
+  }
+  ov.querySelector('.vst').textContent = state === 'listen' ? 'Слухаю…' : state === 'wait' ? 'Обробляю…' : state === 'err' ? 'Не почув' : '';
+  ov.classList.toggle('live', state === 'listen');
+  if (text !== undefined) ov.querySelector('.vtx').textContent = text;
+}
+function voiceFinish(text) {
+  voiceUI('close');
+  const r = parseVoice(text);
+  if (!r) { toast('🎤 Не зрозумів суму: «' + (text || '…') + '». Спробуй ще: спершу суму, потім на що.'); return; }
+  const now = new Date(), m = now.getFullYear() + '-' + pad(now.getMonth() + 1);
+  setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['v' + newId()]: { who: me, cat: 'other', amount: String(r.amount), note: r.note || 'Голосовий запис', at: Date.now(), voice: true } } }, { merge: true });
+  toast('🎤 Записано: ' + fmt(r.amount) + (r.note ? ' · ' + r.note : '') + ' → Різне');
+}
+function voiceStart() {
+  if (!voiceSupported()) { toast('Голосовий запис недоступний на цьому телефоні'); return; }
+  vText = ''; voiceUI('listen', '');
+  if (navigator.vibrate) navigator.vibrate(40);
+  if (NATIVE) { window.Android.startVoice(); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  vrec = new SR(); vrec.lang = 'uk-UA'; vrec.interimResults = true; vrec.continuous = false;
+  vrec.onresult = e => { vText = [...e.results].map(r => r[0].transcript).join(' '); voiceUI('listen', vText); };
+  vrec.onerror = () => voiceUI('err');
+  vrec.onend = () => { if (document.getElementById('vov')) { vrec = null; vText ? voiceFinish(vText) : voiceUI('err', 'Нічого не почуто — натисни «Скасувати» і спробуй ще'); } };
+  try { vrec.start(); } catch (e) { voiceUI('err'); }
+}
+function voiceStop(cancel) {
+  if (cancel) { if (NATIVE) window.Android.cancelVoice(); else if (vrec) { vrec.onend = null; vrec.abort(); } voiceUI('close'); return; }
+  if (NATIVE) { window.Android.stopVoice(); voiceUI('wait'); }
+  else if (vrec) vrec.stop(); else voiceFinish(vText);
+}
+// події від Android-розпізнавання
+window.__voice = (ev, text) => {
+  if (!document.getElementById('vov')) return;
+  if (ev === 'partial') { vText = text; voiceUI('listen', text); }
+  else if (ev === 'final') voiceFinish(text || vText);
+  else if (ev === 'error') { vText ? voiceFinish(vText) : voiceUI('err', 'Нічого не почуто — спробуй ще'); }
+};
+// довге натискання на вкладку «Витрачено»
+(() => {
+  let t = null, fired = false;
+  const start = e => { const b = e.target.closest('[data-tab=exp]'); if (!b || !voiceOn()) return; fired = false; t = setTimeout(() => { fired = true; voiceStart(); }, 550); };
+  const end = () => clearTimeout(t);
+  $app.addEventListener('touchstart', start, { passive: true }); $app.addEventListener('mousedown', start);
+  ['touchend', 'touchmove', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => $app.addEventListener(ev, end, { passive: true }));
+  $app.addEventListener('click', e => { if (fired && e.target.closest('[data-tab=exp]')) { fired = false; e.stopPropagation(); e.preventDefault(); } }, true);
+  $app.addEventListener('contextmenu', e => { if (e.target.closest('[data-tab]')) e.preventDefault(); });
+})();
 function renderAutoNative() {
   const A = window.Android, on = A.notifAccess(), bat = A.batteryOk(), xi = A.isXiaomi();
   let last = []; try { last = JSON.parse(A.lastBank()).reverse(); } catch (e) {}
   const row = (ok, title, sub, act, btn) => '<div class="nrow ' + (ok ? 'ok' : 'bad') + '"><span class="nst">' + (ok ? '✓' : '!') + '</span><span class="sc"><b>' + title + '</b><small>' + sub + '</small></span>' + (act ? '<button class="btn' + (ok ? ' ghost' : '') + '" data-act="' + act + '">' + btn + '</button>' : '') + '</div>';
   return '<div class="top" style="justify-content:flex-start;gap:4px"><button class="back" data-act="back" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>' +
-    '<div><h1 style="font-size:20px">⚡ Автозапис оплат</h1><div class="small muted">Телефон: <b>' + WHO_N(me) + '</b> · версія ' + esc(A.version()) + '</div></div></div>' +
+    '<div><h1 style="font-size:20px">⚙️ Автозапис витрат</h1><div class="small muted">Телефон: <b>' + WHO_N(me) + '</b> · версія ' + esc(A.version()) + '</div></div></div>' +
     '<div class="list"><section class="card"><div class="small">Після оплати карткою Приват застосунок сам читає сповіщення Приват24 і записує витрату від <b>' + WHO_N(me) + '</b> у потрібну статтю — навіть коли він закритий. Перекази, зарахування й коди ігноруються.</div></section>' +
     '<section class="card">' +
       row(on, 'Доступ до сповіщень', on ? 'Увімкнено' : 'Потрібно один раз увімкнути «Сімейна бухгалтерія»', 'n_notif', on ? 'Відкрити' : 'Увімкнути') +
       row(bat, 'Без обмежень батареї', bat ? 'Система не «приспить» автозапис' : 'Інакше система може вимикати автозапис', 'n_bat', bat ? 'Відкрити' : 'Дозволити') +
       (xi ? row(false, 'Автозапуск (Xiaomi/Redmi)', 'Увімкни перемикач навпроти «Сімейна бухгалтерія»', 'n_auto', 'Відкрити') : '') +
     '</section>' +
+    voiceSection() +
     '<section class="card"><h2>Нагадування «Заплановано»</h2><div class="small muted">Приходять як системні сповіщення зі звуком, навіть коли застосунок закритий.</div><button class="btn ghost" data-act="n_test">Перевірити (сигнал за 10 с)</button></section>' +
     '<section class="card"><h2>Останні сповіщення банку</h2>' + (last.length ? last.slice(0, 8).map(x => { const r = parseBankPush(x.text); return '<div class="srow ' + (r && r.amount ? 'bys' : '') + '"><span class="et"><b>' + (r && r.amount ? fmt(r.amount) + ' → ' + esc(CAT[r.cat].name) : 'не витрата') + '</b><small>' + esc(x.text) + ' · ' + stDate(x.at) + '</small></span></div>'; }).join('') : '<div class="small muted">Ще не було. Зроби оплату — тут з\'явиться, що прийшло і як розпізналось.</div>') + '</section>' +
     '<button class="btn ghost" data-act="n_upd" style="width:100%">Перевірити оновлення застосунку</button></div>';
@@ -791,8 +890,9 @@ function renderAuto() {
   const box = (id, val) => '<div class="cbox"><code id="' + id + '">' + esc(val) + '</code><button class="btn ghost" data-copy="' + id + '">Копіювати</button></div>';
   const step = (n, t, body) => '<section class="card"><h2><span class="stn">' + n + '</span>' + t + '</h2>' + body + '</section>';
   return '<div class="top" style="justify-content:flex-start;gap:4px"><button class="back" data-act="back" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>' +
-    '<div><h1 style="font-size:20px">⚡ Автозапис оплат</h1><div class="small muted">Налаштування для телефону: <b>' + name + '</b></div></div></div>' +
+    '<div><h1 style="font-size:20px">⚙️ Автозапис витрат</h1><div class="small muted">Налаштування для телефону: <b>' + name + '</b></div></div></div>' +
     '<div class="list"><section class="card"><div class="small">Після оплати карткою Приват (NFC, термінал, онлайн) Приват24 надсилає сповіщення. Програма <b>MacroDroid</b> перехоплює його і передає сюди: застосунок сам бере суму й магазин, ставить статтю і записує витрату від <b>' + name + '</b>. Зарахування, перекази й коди підтвердження ігноруються. Записи з автозапису позначені «⚡ авто» — їх можна змінити чи видалити як звичайні.</div></section>' +
+    voiceSection() +
     step(1, 'Встановити MacroDroid', '<div class="small">Google Play → <b>MacroDroid</b> (безкоштовно). При першому запуску дозволь <b>доступ до сповіщень</b>.</div><a class="btn big" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid" target="_blank" rel="noopener">Відкрити в Google Play</a>') +
     step(2, 'Тригер', '<div class="small">«Додати макрос» → <b>Тригери +</b> → <b>Пристрій / Сповіщення</b> → <b>Сповіщення</b> → «Сповіщення з\'явилось» → вибрати програму <b>Приват24</b> → текст: <b>будь-який</b> → OK.</div>') +
     step(3, 'Дія — HTTP-запит', '<div class="small"><b>Дії +</b> → <b>Веб-інтеграція</b> → <b>HTTP-запит</b>. Метод: <b>POST</b>.</div><div class="small muted">URL:</div>' + box('aurl', INBOX_URL) +
@@ -1061,6 +1161,8 @@ $app.addEventListener('click', e => {
   else if (t.dataset.act === 'autoset') { st.screen = 'auto'; render(); window.scrollTo(0, 0); }
   else if (t.dataset.copy) { const v = $app.querySelector('#' + t.dataset.copy).textContent; (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(() => { t.textContent = '✓ Скопійовано'; setTimeout(() => { t.textContent = 'Копіювати'; }, 1500); }).catch(() => { const r = document.createRange(); r.selectNodeContents($app.querySelector('#' + t.dataset.copy)); getSelection().removeAllRanges(); getSelection().addRange(r); }); }
   else if (t.dataset.act === 'autotest') autoTest(t);
+  else if (t.dataset.act === 'vtoggle') { ls.set('voice', voiceOn() ? '0' : '1'); render(); }
+  else if (t.dataset.act === 'vtry') voiceStart();
   else if (t.dataset.act === 'n_notif') window.Android.openNotifAccess();
   else if (t.dataset.act === 'n_bat') window.Android.openBattery();
   else if (t.dataset.act === 'n_auto') window.Android.openAutostart();

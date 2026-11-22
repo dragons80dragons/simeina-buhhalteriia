@@ -20,6 +20,10 @@ import android.os.Environment;
 import android.os.PowerManager;
 import android.provider.MediaStore;
 import android.provider.Settings;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import java.util.ArrayList;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -36,6 +40,53 @@ public class MainActivity extends Activity {
     ValueCallback<Uri[]> fileCb;
     Uri cameraUri;
     long dlId = -1;
+    SpeechRecognizer sr;
+    boolean voicePending = false;
+
+    // ---------- голосовий запис ----------
+    void js(String ev, String text) {
+        String q = text == null ? "''" : JSONObject.quote(text);
+        runOnUiThread(() -> web.evaluateJavascript("window.__voice && __voice('" + ev + "'," + q + ")", null));
+    }
+    void voiceStart() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            voicePending = true;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 3);
+            return;
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) { js("error", ""); Toast.makeText(this, "На телефоні немає розпізнавання мовлення Google", Toast.LENGTH_LONG).show(); return; }
+        if (sr != null) sr.destroy();
+        sr = SpeechRecognizer.createSpeechRecognizer(this);
+        sr.setRecognitionListener(new RecognitionListener() {
+            String best(Bundle b) { ArrayList<String> r = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION); return r != null && !r.isEmpty() ? r.get(0) : ""; }
+            @Override public void onReadyForSpeech(Bundle p) { js("ready", ""); }
+            @Override public void onBeginningOfSpeech() { }
+            @Override public void onRmsChanged(float v) { }
+            @Override public void onBufferReceived(byte[] b) { }
+            @Override public void onEndOfSpeech() { }
+            @Override public void onError(int e) { js("error", String.valueOf(e)); }
+            @Override public void onResults(Bundle b) { js("final", best(b)); }
+            @Override public void onPartialResults(Bundle b) { String t = best(b); if (!t.isEmpty()) js("partial", t); }
+            @Override public void onEvent(int t, Bundle b) { }
+        });
+        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "uk-UA");
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "uk-UA");
+        i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
+        sr.startListening(i);
+    }
+
+    @Override public void onRequestPermissionsResult(int req, String[] perms, int[] res) {
+        super.onRequestPermissionsResult(req, perms, res);
+        if (req == 3) {
+            if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED && voicePending) voiceStart();
+            else js("error", "perm");
+            voicePending = false;
+        }
+    }
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -236,6 +287,9 @@ public class MainActivity extends Activity {
                 Alarms.sync(MainActivity.this, a);
             } catch (Exception ignored) { }
         }
+        @JavascriptInterface public void startVoice() { runOnUiThread(MainActivity.this::voiceStart); }
+        @JavascriptInterface public void stopVoice() { runOnUiThread(() -> { if (sr != null) sr.stopListening(); }); }
+        @JavascriptInterface public void cancelVoice() { runOnUiThread(() -> { if (sr != null) sr.cancel(); }); }
         @JavascriptInterface public String lastBank() { return Store.arr(MainActivity.this, "lastBank").toString(); }
         @JavascriptInterface public int queued() { return Store.arr(MainActivity.this, "queue").length(); }
         @JavascriptInterface public void checkUpdate() { runOnUiThread(() -> MainActivity.this.checkUpdate(true)); }
