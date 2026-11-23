@@ -228,3 +228,50 @@ input.cin{font-weight:700}
 .vhint{font-size:12px;color:#5B6660}
 .vbox .grid2{width:100%}
 .tabs button[data-tab=exp]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+/* --- перемикач теми --- */
+.topr{display:flex;align-items:center;gap:8px}
+.thbtn{width:44px;height:44px;border-radius:22px;border:1px solid #D5D9D2;background:#fff;font-size:20px;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+:root{color-scheme:only light}
+/* ===== ТЕМНА ТЕМА ===== */
+html[data-theme=dark]{color-scheme:dark}
+html[data-theme=dark] body{color:#E6EAE7}
+html[data-theme=dark] .card,html[data-theme=dark] .sheet,html[data-theme=dark] .vbox{background:#1F252A;color:#E6EAE7}
+html[data-theme=dark] .muted,html[data-theme=dark] .sync,html[data-theme=dark] label.f,html[data-theme=dark] .boot,html[data-theme=dark] .empty,
+html[data-theme=dark] .vhint,html[data-theme=dark] .dhint,html[data-theme=dark] .lt small,html[data-theme=dark] .erow .et small,html[data-theme=dark] .srow .et small,
+html[data-theme=dark] .nrow .sc small,html[data-theme=dark] .vhead .sc small,html[data-theme=dark] .li .ln{color:#9AA59F}
+html[data-theme=dark] .sel select,html[data-theme=dark] .thbtn,html[data-theme=dark] .btn.ghost,html[data-theme=dark] .sign button,html[data-theme=dark] .sops button,
+html[data-theme=dark] .cchip,html[data-theme=dark] .chip{background:#2A3137;border-color:#3D464E;color:#E6EAE7}
+html[data-theme=dark] .cchip.on{background:#C9A227;color:#111}
+html[data-theme=dark] .chip.on{background:var(--c);color:#fff}
+html[data-theme=dark] label.f input,html[data-theme=dark] .sheet input,html[data-theme=dark] .sform input,html[data-theme=dark] .lsel,html[data-theme=dark] .cbox{background:#2A3137;border-color:#3D464E;color:#E6EAE7}
+html[data-theme=dark] .seg,html[data-theme=dark] .tabs{background:rgba(255,255,255,.06)}
+html[data-theme=dark] .seg button{color:#9AA59F}
+html[data-theme=dark] .seg button.on-s{background:#1D2D40;color:#8DB6E6;border-color:#5B8FCB}
+html[data-theme=dark] .seg button.on-d{background:#3A2030;color:#E79BBE;border-color:#D0739C}
+html[data-theme=dark] .tabs button[data-tab=inc]{color:#5BD07F}
+html[data-theme=dark] .tabs button[data-tab=exp]{color:#FF7A7D}
+html[data-theme=dark] .tabs button[data-tab=lists]{color:#7FAEF5}
+html[data-theme=dark] .tabs button.on{color:#fff}
+html[data-theme=dark] .tot.s,html[data-theme=dark] .bys,html[data-theme=dark] .erow.bys{background:#1D2D40;color:#B9D3F0}
+html[data-theme=dark] .tot.d,html[data-theme=dark] .byd,html[data-theme=dark] .erow.byd{background:#3A2030;color:#F0C2D6}
+html[data-theme=dark] .diff.neg,html[data-theme=dark] .tot.carry.neg,html[data-theme=dark] .nrow.bad{background:#3B1F1D;color:#FF9A93}
+html[data-theme=dark] .diff.pos,html[data-theme=dark] .tot.carry.pos,html[data-theme=dark] .nrow.ok{background:#17321F;color:#86E0A2}
+html[data-theme=dark] .diff.zero,html[data-theme=dark] .tot.carry.zero{background:#2A3137;color:#9AA59F}
+html[data-theme=dark] .slot{background:#3B1F1D;border-color:#6B2E2A;color:#FFB0A8}
+html[data-theme=dark] .slot.has{background:#17321F;border-color:#2F6B43;color:#9BE3B2}
+html[data-theme=dark] .li.done{background:#17321F}
+html[data-theme=dark] .li.done .lt b{color:#86C79A}
+html[data-theme=dark] .ck{background:#2A3137;border-color:#6C7780}
+html[data-theme=dark] .ibtn{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.15);color:#E6EAE7}
+html[data-theme=dark] .leg,html[data-theme=dark] .erow{border-color:#2F363C}
+html[data-theme=dark] .split{background:#2F363C}
+html[data-theme=dark] .donut text{fill:#E6EAE7}
+html[data-theme=dark] .donut text:first-of-type,html[data-theme=dark] .donut text:last-of-type{fill:#9AA59F}
+html[data-theme=dark] .donut circle[stroke="#E4E7E1"]{stroke:#2F363C}
+html[data-theme=dark] .mtile,html[data-theme=dark] .sbig,html[data-theme=dark] .stash,html[data-theme=dark] .stashcard{background:#33290F;border-color:#7A6320;color:#F1D98A}
+html[data-theme=dark] .autobtn{background:#16253D;border-color:#3D6FC0;color:#B9D3F0}
+html[data-theme=dark] .vtx{color:#E6EAE7}
+html[data-theme=dark] .back{color:#E6EAE7}
+html[data-theme=dark] .sheet > .btn.big[data-save]{box-shadow:0 -10px 14px #1F252A}
+html[data-theme=dark] .overlay,html[data-theme=dark] .vov{background:rgba(0,0,0,.65)}
+html[data-theme=dark] .li.placeholder{outline-color:#7FAEF5}

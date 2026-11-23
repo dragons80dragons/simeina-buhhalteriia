@@ -14,6 +14,11 @@ if (qs.get('f') || qs.get('me')) history.replaceState(null, '', location.pathnam
 const fid = ls.get('fid');
 const me = ls.get('me') || 's';
 const NATIVE = typeof window.Android !== 'undefined';
+// Тема: світла / темна (за замовчуванням — як у системі)
+const sysDark = () => window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+const themeNow = () => ls.get('theme') || (sysDark() ? 'dark' : 'light');
+function applyTheme() { document.documentElement.dataset.theme = themeNow(); const mt = document.querySelector('meta[name=theme-color]'); if (mt) mt.content = themeNow() === 'dark' ? '#15191C' : '#EAF1F8'; }
+applyTheme();
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
@@ -107,7 +112,8 @@ const SYM = { UAH: '₴', USD: '$', EUR: '€' };
 const fmtC = (n, c) => fmt(n).replace(' ₴', ' ' + SYM[c || 'UAH']);
 // гривневий еквівалент операції — саме він мінусується/додається до прибутку місяця; обмін на прибуток не впливає
 const sUah = x => !x || x.type === 'conv' ? 0 : (x.uah !== undefined ? num(x.uah) : num(x.amount));
-const stashOf = d => Object.values(d.stash || {}).reduce((t, x) => t + sUah(x), 0);
+// Матрац — окреме зберігання: на прибуток/залишок не впливає. Прив'язка до бухгалтерії йде окремими записами Бонус+ / Різне.
+const stashOf = d => 0;
 const hasExp = d => Object.keys((d && d.exp) || {}).length > 0;
 const setC = d => d && d.carry !== undefined && d.carry !== null && d.carry !== '';
 const mdata = m => (m === st.month ? st.data : (st.all[m] || {}));
@@ -146,7 +152,7 @@ async function loadRates() {
     if (g('USD') && g('EUR')) { st.rates = { USD: g('USD'), EUR: g('EUR'), date: (r.find(x => x.cc === 'USD') || {}).exchangedate }; ls.set('rates', JSON.stringify(st.rates)); if (st.screen === 'stash') updStashForm(); }
   } catch (e) {}
 }
-const familyNet = () => totalOf('s') + totalOf('d') + carry() - stashMonth();
+const familyNet = () => totalOf('s') + totalOf('d') + carry();
 const field = k => (st.data[k] ?? DEF[k] ?? '');
 
 // ---------- sync ----------
@@ -200,7 +206,10 @@ function render() {
   if (typingInApp() || drag.on) { dirty = true; return; }
   dirty = false;
   const w = st.tab === 'inc' ? st.profile : me;
-  const theme = w === 's' ? { bg: '#EAF1F8', accent: '#3E6FA3', ink: '#2D5683' } : { bg: '#F9EDF2', accent: '#B0517A', ink: '#8E3A60' };
+  const dk = themeNow() === 'dark';
+  const theme = w === 's' ? (dk ? { bg: '#141A21', accent: '#5B8FCB' } : { bg: '#EAF1F8', accent: '#3E6FA3', ink: '#2D5683' })
+                          : (dk ? { bg: '#1E151A', accent: '#D0739C' } : { bg: '#F9EDF2', accent: '#B0517A', ink: '#8E3A60' });
+  document.documentElement.dataset.theme = dk ? 'dark' : 'light';
   document.body.style.setProperty('--bg', theme.bg);
   document.body.style.setProperty('--accent', theme.accent);
   document.querySelector('meta[name=theme-color]').setAttribute('content', theme.bg);
@@ -279,13 +288,13 @@ function render() {
     '<div class="tot d"><span>Загалом зароблено Дашею за ' + mword + '</span><b>' + fmt(totalOf('d')) + '</b></div>' +
     carryBtn() +
     '<div class="famrow"><div><div class="muted" style="font-size:13px">Прибуток нашої сім\'ї за ' + mword + '</div><div class="family">' + fmt(familyNet()) + '</div>' +
-    (carry() || stashMonth() ? '<div class="small muted">з урахуванням залишку' + (stashMonth() > 0 ? ' і −' + fmt(stashMonth()) + ' у матрац' : stashMonth() < 0 ? ' і +' + fmt(-stashMonth()) + ' з матрацу' : '') + '</div>' : '') + '</div>' + stashBtn() + '</div></section>' +
+    (carry() ? '<div class="small muted">з урахуванням залишку з минулого місяця</div>' : '') + '</div>' + stashBtn() + '</div></section>' +
     '</div>';
 }
 
 function topBar(title, sync, opts) {
-  return '<div class="top"><div><h1>' + title + '</h1>' + sync + '</div>' +
-    (opts ? '<label class="sel"><select data-act="month" aria-label="Місяць">' + opts + '</select><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6660" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></label>' : '') + '</div>' +
+  return '<div class="top"><div><h1>' + title + '</h1>' + sync + '</div><div class="topr"><button class="thbtn" data-act="theme" aria-label="Тема">' + (themeNow() === 'dark' ? '☀️' : '🌙') + '</button>' +
+    (opts ? '<label class="sel"><select data-act="month" aria-label="Місяць">' + opts + '</select><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></label>' : '') + '</div></div>' +
     '<div class="tabs"><button data-tab="inc" class="' + (st.tab === 'inc' ? 'on' : '') + '">Прибутки</button><button data-tab="exp" class="' + (st.tab === 'exp' ? 'on' : '') + '">Витрачено</button><button data-tab="lists" class="' + (st.tab === 'lists' ? 'on' : '') + '">Купити / Зробити</button></div>';
 }
 function stashBtn() {
@@ -357,7 +366,7 @@ function renderExp(mword) {
     '<div class="tot d"><span>Витратила Даша</span><b>' + fmt(td) + '</b></div>' +
     carryBtn() +
     '<div class="famrow"><div><div class="muted" style="font-size:13px">Витрачено сім\'єю за ' + mword + '</div><div class="family">' + fmt(total) + '</div></div>' + stashBtn() + '</div>' +
-    '<div class="ctr" style="padding:2px 4px 0"><div class="muted small">Залишок (прибуток + залишок − матрац − витрати)</div><div class="num" style="font-size:20px;font-weight:700;color:' + (inc - total < 0 ? '#B3261E' : '#1E7A44') + '">' + fmt(inc - total) + '</div></div></section>' +
+    '<div class="ctr" style="padding:2px 4px 0"><div class="muted small">Залишок (прибуток + залишок − витрати)</div><div class="num" style="font-size:20px;font-weight:700;color:' + (inc - total < 0 ? '#B3261E' : '#1E7A44') + '">' + fmt(inc - total) + '</div></div></section>' +
     '</div>';
 }
 
@@ -578,14 +587,14 @@ function renderStash() {
     let main;
     if (x.type === 'conv') main = 'Обмін ' + fmtC(num(x.famt), x.from) + ' → ' + fmtC(num(x.tamt), x.to);
     else { const a = num(x.amount), c = x.cur || 'UAH'; main = (a > 0 ? '+' : '') + fmtC(a, c) + (c !== 'UAH' && x.uah !== undefined ? ' <span class="muted">(≈ ' + fmt(Math.abs(num(x.uah))) + ')</span>' : ''); }
-    return '<div class="srow ' + (x.who === 'd' ? 'byd' : 'bys') + '"><span class="et"><b class="num">' + main + '</b><small>' + WHO_N(x.who) + ' · ' + stDate(x.at) + (x.note ? ' · ' + esc(x.note) : '') + '</small></span>' +
+    return '<div class="srow ' + (x.who === 'd' ? 'byd' : 'bys') + '"><span class="et"><b class="num">' + main + '</b><small>' + WHO_N(x.who) + ' · ' + stDate(x.at) + (x.note ? ' · ' + esc(x.note) : '') + (x.type !== 'conv' ? (x.link ? ' · 📒 у бухгалтерії' : ' · поза бухгалтерією') : '') + '</small></span>' +
       '<button type="button" class="ibtn del" data-act="sdel" data-sid="' + esc(x.m) + '|' + esc(x.id) + '" aria-label="Видалити">✕</button></div>';
   }).join('');
   return '<div class="top" style="justify-content:flex-start;gap:4px"><button class="back" data-act="back" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>' +
     '<div><h1 style="font-size:20px">🛏️ Матрац</h1><div class="small muted">Спільний для обох · вносить ' + WHO_N(me) + '</div></div></div>' +
     '<div class="list"><section class="card"><div class="mtiles">' + tiles + '</div>' +
     '<div class="small muted ctr">' + (st.rates ? 'Разом ≈ <b>' + fmt(totalUah) + '</b> · курс НБУ на ' + esc(st.rates.date || '') + ': $ ' + String(st.rates.USD.toFixed(2)).replace('.', ',') + ' · € ' + String(st.rates.EUR.toFixed(2)).replace('.', ',') : 'Курс НБУ завантажиться, коли буде інтернет') + '</div>' +
-    '<div class="small muted ctr">Цього місяця в матрац: ' + fmt(stashMonth()) + ' — мінусується з прибутку сім\'ї</div></section>' +
+    '<div class="small muted ctr">Матрац — окреме зберігання, на поточну бухгалтерію не впливає</div></section>' +
     '<section class="card sform"><div class="sops">' + [['in', '+ Покласти'], ['out', '− Забрати'], ['conv', '⇄ Обміняти']].map(([k, t]) => '<button class="' + (op === k ? 'on ' + k : '') + '" data-sop="' + k + '">' + t + '</button>').join('') + '</div>' + form + '</section>' +
     (hist ? '<section class="card"><h2>Історія</h2><div class="shist">' + hist + '</div></section>' : '') + '</div>';
 }
@@ -610,7 +619,7 @@ function updStashForm(changed) {
     if (row) { row.style.display = c === 'UAH' ? 'none' : ''; row.firstChild.textContent = 'Курс, ₴ за 1 ' + SYM[c]; }
     if (c !== 'UAH' && changed !== 'rate' && rateOf(c)) sfset('rate', r4(rateOf(c)));
     const a = num(sfv('amt')), u = c === 'UAH' ? a : a * num(sfv('rate'));
-    hint.textContent = a > 0 ? (op === 'out' ? 'Додасться до прибутку місяця: ' : 'Мінусується з прибутку місяця: ') + fmt(u) : '';
+    hint.textContent = a > 0 && c !== 'UAH' ? '≈ ' + fmt(u) : '';
   }
 }
 function stashDo() {
@@ -629,11 +638,34 @@ function stashDo() {
     if (!(rate > 0)) return fail('rate');
     if (op === 'out' && !note) return fail('note', 'Напиши, куди забрано.');
     if (op === 'out' && a > stashBal()[c] + 0.001 && !confirm('У матраці лише ' + fmtC(stashBal()[c], c) + '. Все одно забрати?')) return;
-    const sg = op === 'out' ? -1 : 1;
-    save({ stash: { [newId()]: { ...base, type: op, cur: c, amount: String(sg * a), uah: String(Math.round(sg * a * rate * 100) / 100) } } });
+    const sg = op === 'out' ? -1 : 1, uah = Math.round(a * rate * 100) / 100;
+    document.activeElement && document.activeElement.blur();
+    askLink(op, uah, link => {
+      const sid = newId(), e = { ...base, type: op, cur: c, amount: String(sg * a), uah: String(sg * uah), link };
+      const nowD = new Date(), m = nowD.getFullYear() + '-' + pad(nowD.getMonth() + 1), lid = 'm' + sid;
+      if (link) {
+        e.lm = m; e.lid = lid; e.lk = op === 'in' ? 'exp' : 'bonus';
+        const txt = (op === 'in' ? 'Перенесено до матрацу' : 'Перенесено з матрацу') + (c !== 'UAH' ? ' (' + fmtC(a, c) + ')' : '') + (note ? ' · ' + note : '');
+        const rec = op === 'in' ? { exp: { [lid]: { who: me, cat: 'other', amount: String(uah), note: txt, at: Date.now(), stash: true } } }
+                                : { bonus: { [lid]: { who: me, amount: String(uah), note: txt, at: Date.now(), stash: true } } };
+        setDoc(doc(db, 'families', fid, 'months', m), rec, { merge: true });
+      }
+      save({ stash: { [sid]: e } });
+      toast(link ? (op === 'in' ? '🛏️ Покладено й записано у «Витрачено → Різне»' : '🛏️ Забрано й записано в «Бонус+»') : '🛏️ Записано лише в матраці');
+      render();
+    });
+    return;
   }
   document.activeElement && document.activeElement.blur();
   render();
+}
+function askLink(op, uah, cb) {
+  const ov = document.createElement('div'); ov.className = 'vov';
+  ov.innerHTML = '<div class="vbox"><div style="font-size:34px">🛏️</div><b style="font-size:18px">' + (op === 'in' ? 'Покласти ' : 'Забрати ') + esc(fmt(uah)) + '</b>' +
+    '<div class="small muted">' + (op === 'in' ? 'Якщо «до поточної бухгалтерії» — у «Витрачено → Різне» з\'явиться «Перенесено до матрацу».' : 'Якщо «до поточної бухгалтерії» — у «Бонус+» з\'явиться «Перенесено з матрацу».') + '</div>' +
+    '<button class="btn big" data-l="1">До поточної бухгалтерії</button><button class="btn big ghost" data-l="0">Поза бухгалтерією (лише матрац)</button><button class="btn ghost" data-l="x">Скасувати</button></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', e => { const b = e.target.closest('[data-l]'); if (!b) return; ov.remove(); if (b.dataset.l !== 'x') cb(b.dataset.l === '1'); });
 }
 
 // ---------- автозапис оплат з push-сповіщень Приват24 (через MacroDroid) ----------
@@ -750,6 +782,7 @@ async function handleInbox1(id, x) {
   } catch (e) { handledInbox.delete(id); }
 }
 function toast(msg) {
+  document.querySelectorAll('.toast').forEach(z => z.remove());
   const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t);
   setTimeout(() => t.classList.add('out'), 3500); setTimeout(() => t.remove(), 4200);
 }
@@ -767,7 +800,7 @@ const voiceSupported = () => NATIVE ? typeof window.Android.startVoice === 'func
 function voiceSection() {
   const ok = voiceSupported(), on = voiceOn() && ok;
   return '<section class="card"><div class="vhead"><span class="si">🎤</span><span class="sc"><b>Голосовий запис витрат</b><small>' +
-    (ok ? 'Довго натисни вкладку «Витрачено» і скажи: спершу суму, потім на що. Запис іде в «Різне», статтю потім можна змінити.' : 'Потрібне оновлення застосунку — натисни «Перевірити оновлення застосунку» внизу.') +
+    (ok ? 'Довго натисни вкладку «Витрачено» і скажи: спершу суму, потім на що. Стаття визначається сама (якщо не вдалось — «Різне»), змінити можна вручну.' : 'Потрібне оновлення застосунку — натисни «Перевірити оновлення застосунку» внизу.') +
     '</small></span><button class="tgl' + (on ? ' on' : '') + '" data-act="vtoggle"' + (ok ? '' : ' disabled') + ' aria-label="Голосовий запис"><i></i></button></div>' +
     (on ? '<button class="btn ghost" data-act="vtry" style="width:100%">Спробувати зараз</button>' : '') + '</section>';
 }
@@ -817,13 +850,32 @@ function voiceUI(state, text) {
   ov.classList.toggle('live', state === 'listen');
   if (text !== undefined) ov.querySelector('.vtx').textContent = text;
 }
+const VOICE_CATS = [
+  [/хліб|молок|м'яс|ковбас|сир\b|сири|яйц|овоч|фрукт|продукт|магазин|супермаркет|атб|сільпо|аврора|цукерк|солодощ|крупа|макарон|олія|вода\b|сік\b|соки|риба|курк|ковбас|чай\b|кава в зернах|бакалі/i, 'food'],
+  [/кафе|ресторан|кав'ярн|кава|піц|суші|бургер|макдональдс|шаурм|обід|вечер|сніданок|доставк/i, 'cafe'],
+  [/таксі|бензин|пальн|заправ|дизель|газ на авто|автобус|маршрутк|проїзд|квиток|потяг|ремонт авто|шиномонт|запчастини на авто|мийк|парков|bolt|uklon|уклон/i, 'transport'],
+  [/аптек|ліки|таблетк|лікар|стоматол|аналіз|вітамін|медик/i, 'health'],
+  [/одяг|куртк|штан|джинс|футболк|сукн|плаття|взутт|кросівк|черевик|шапк|шкарпет|білизн/i, 'clothes'],
+  [/іграшк|кіра|кірі|кіру|дитяч|розваг|кінотеатр|атракціон|парк розваг/i, 'toys'],
+  [/комунал|світло|електроенерг|газ\b|вода за|інтернет|мобільн|поповнення телефону|київстар|водафон|лайф|оренд/i, 'utils'],
+  [/школ|садок|садочок|навчан|курс|книг|зошит|канцеляр|репетитор|гурток/i, 'kids'],
+  [/комп'ютер|ноутбук|телефон\b|запчастин|відеокарт|процесор|кабель|зарядк|флешк|диск\b|мишк|клавіатур|паяльник|радіодеталь/i, 'comp'],
+  [/дистил|самогон|брага|дріжд|цукор на|мідь|колон|бочк|фермент|пектиназ/i, 'distill'],
+  [/салон|перукар|стрижк|манікюр|педикюр|косметолог|брови|вії|тюнінг/i, 'beauty'],
+  [/побут|посуд|миюч|порош|шампун|мило|туалетн|ремонт|будматеріал|фарб|інструмент|меблі|лампочк|господар|епіцентр/i, 'home']
+];
+function voiceCat(note) {
+  for (const [re, c] of VOICE_CATS) if (re.test(note)) return c;
+  const c2 = catByShop(note); return c2.cat || 'other';
+}
 function voiceFinish(text) {
   voiceUI('close');
   const r = parseVoice(text);
   if (!r) { toast('🎤 Не зрозумів суму: «' + (text || '…') + '». Спробуй ще: спершу суму, потім на що.'); return; }
   const now = new Date(), m = now.getFullYear() + '-' + pad(now.getMonth() + 1);
-  setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['v' + newId()]: { who: me, cat: 'other', amount: String(r.amount), note: r.note || 'Голосовий запис', at: Date.now(), voice: true } } }, { merge: true });
-  toast('🎤 Записано: ' + fmt(r.amount) + (r.note ? ' · ' + r.note : '') + ' → Різне');
+  const cat = r.note ? voiceCat(r.note) : 'other';
+  setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['v' + newId()]: { who: me, cat, amount: String(r.amount), note: r.note || 'Голосовий запис', at: Date.now(), voice: true } } }, { merge: true });
+  toast('🎤 Записано: ' + fmt(r.amount) + (r.note ? ' · ' + r.note : '') + ' → ' + CAT[cat].name);
 }
 function voiceStart() {
   if (!voiceSupported()) { toast('Голосовий запис недоступний на цьому телефоні'); return; }
@@ -1161,6 +1213,7 @@ $app.addEventListener('click', e => {
   else if (t.dataset.act === 'autoset') { st.screen = 'auto'; render(); window.scrollTo(0, 0); }
   else if (t.dataset.copy) { const v = $app.querySelector('#' + t.dataset.copy).textContent; (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(() => { t.textContent = '✓ Скопійовано'; setTimeout(() => { t.textContent = 'Копіювати'; }, 1500); }).catch(() => { const r = document.createRange(); r.selectNodeContents($app.querySelector('#' + t.dataset.copy)); getSelection().removeAllRanges(); getSelection().addRange(r); }); }
   else if (t.dataset.act === 'autotest') autoTest(t);
+  else if (t.dataset.act === 'theme') { ls.set('theme', themeNow() === 'dark' ? 'light' : 'dark'); applyTheme(); render(); }
   else if (t.dataset.act === 'vtoggle') { ls.set('voice', voiceOn() ? '0' : '1'); render(); }
   else if (t.dataset.act === 'vtry') voiceStart();
   else if (t.dataset.act === 'n_notif') window.Android.openNotifAccess();
@@ -1168,7 +1221,7 @@ $app.addEventListener('click', e => {
   else if (t.dataset.act === 'n_auto') window.Android.openAutostart();
   else if (t.dataset.act === 'n_test') { window.Android.testAlarm(); toast('Сигнал прийде за 10 секунд — можна згорнути застосунок'); }
   else if (t.dataset.act === 'n_upd') window.Android.checkUpdate();
-  else if (t.dataset.act === 'sdel') { if (confirm('Видалити цей запис з історії матрацу?')) { const [m, id] = t.dataset.sid.split('|'); setDoc(doc(db, 'families', fid, 'months', m), { stash: { [id]: deleteField() } }, { merge: true }); } }
+  else if (t.dataset.act === 'sdel') { const [sm0, si0] = t.dataset.sid.split('|'); const se = ((st.all[sm0] || {}).stash || {})[si0] || ((mdata(sm0).stash || {})[si0]); if (se && se.link && se.lm && se.lid && confirm('Видалити цей запис з історії матрацу разом із пов\'язаним записом у бухгалтерії?')) { setDoc(doc(db, 'families', fid, 'months', se.lm), { [se.lk]: { [se.lid]: deleteField() } }, { merge: true }); setDoc(doc(db, 'families', fid, 'months', sm0), { stash: { [si0]: deleteField() } }, { merge: true }); } else if (!(se && se.link) && confirm('Видалити цей запис з історії матрацу?')) { const [m, id] = t.dataset.sid.split('|'); setDoc(doc(db, 'families', fid, 'months', m), { stash: { [id]: deleteField() } }, { merge: true }); } }
   else if (t.dataset.ladd) openItem(t.dataset.ladd);
   else if (t.dataset.lact) listAction(t.dataset.lact, t.dataset.l, t.dataset.id);
 });
