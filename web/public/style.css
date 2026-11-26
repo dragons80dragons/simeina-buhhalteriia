@@ -293,3 +293,7 @@ html[data-theme=dark] .rrow.ok{background:#17321F}
 html[data-theme=dark] .rrow.late{background:#3B1F1D}
 html[data-theme=dark] .rrow .rmain small{color:#9AA59F}
 html[data-theme=dark] .recbtn{background:#33290F;border-color:#7A6320;color:#F1D98A}
+
+.varblk{margin:34px 6px 10px;font-size:11.5px;line-height:1.55;color:#7A847E}
+.varblk .vt{font-weight:600;margin-bottom:3px}
+html[data-theme=dark] .varblk{color:#8E9892}

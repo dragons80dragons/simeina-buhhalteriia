@@ -1287,51 +1287,90 @@ function openBill() {
 
 // --- постійні платежі ---
 const recList = () => Object.entries(st.lists.rec || {}).map(([id, r]) => ({ id, ...r })).filter(r => r && r.name).sort((a, b) => (a.day || 0) - (b.day || 0) || a.name.localeCompare(b.name));
-function recPaid(r) {
-  const ex = Object.entries(st.data.exp || {}).map(([id, e]) => ({ id, ...e }));
-  const byLink = ex.find(e => e.rec === r.id);
-  if (byLink) return byLink;
-  if (r.match) { const k = r.match.toLowerCase(); return ex.find(e => (e.note || '').toLowerCase().includes(k)) || null; }
-  return null;
+const MON_S = ['січ', 'лют', 'бер', 'кві', 'тра', 'чер', 'лип', 'сер', 'вер', 'жов', 'лис', 'гру'];
+// сума платежу в місяці m: інша сума для вибраних місяців (напр. взимку)
+const recAmt = (r, m = st.month) => num((r.alt && (r.altM || []).includes(parseInt(m.slice(5), 10))) ? r.alt : r.amount);
+// одна витрата зараховується лише одному платежу
+function recPaidMap() {
+  const ex = Object.entries(st.data.exp || {}).map(([id, e]) => ({ id, ...e })), used = new Set(), out = {};
+  const list = recList();
+  for (const r of list) { const e = ex.find(e => e.rec === r.id); if (e) { out[r.id] = e; used.add(e.id); } }
+  for (const r of list) {
+    if (out[r.id] || !r.match) continue;
+    const ks = r.match.toLowerCase().split(/\s*,\s*/).filter(Boolean);
+    const e = ex.find(e => !used.has(e.id) && !e.rec && (!r.who || e.who === r.who) && ks.some(k => (e.note || '').toLowerCase().includes(k)));
+    if (e) { out[r.id] = e; used.add(e.id); }
+  }
+  return out;
 }
-function recLeft() { return recList().filter(r => !recPaid(r)).reduce((t, r) => t + num(r.amount), 0); }
+function recPaid(r) { return recPaidMap()[r.id] || null; }
+function recLeft() { const pm = recPaidMap(); return recList().filter(r => !pm[r.id]).reduce((t, r) => t + recAmt(r), 0); }
+const recDay = d => (d >= 28 ? 'наприкінці місяця' : 'до ' + d + ' числа');
+// регулярні змінні витрати — діапазон за останні місяці
+function varBlock() {
+  const keys = Object.keys(st.all).concat(st.month).filter((v, i, a) => a.indexOf(v) === i).sort();
+  const prev = keys.filter(k => k < st.month && Object.values(mdata(k).exp || {}).filter(e => !e.stash).length >= 30).slice(-3); // лише місяці, де витрати вели повністю
+  const sumCat = (m, c) => Object.values(mdata(m).exp || {}).filter(e => e.cat === c && !e.stash && !e.rec).reduce((t, e) => t + num(e.amount), 0);
+  const now = new Date(), cur = st.month === now.getFullYear() + '-' + pad(now.getMonth() + 1);
+  const dim = new Date(+st.month.slice(0, 4), +st.month.slice(5), 0).getDate(), part = cur ? now.getDate() / dim : 1;
+  const k = v => (v >= 1000 ? (Math.round(v / 100) / 10).toString().replace('.', ',') + ' тис' : Math.round(v) + '');
+  const rows = [['food', 'Їжа'], ['transport', 'Транспорт і таксі'], ['cafe', 'Кава і перекуси'], ['health', 'Аптека і здоров\'я']].map(([c, n]) => {
+    const v = prev.map(m => sumCat(m, c)), now0 = sumCat(st.month, c);
+    if (!v.length) return '';
+    const lo = Math.min(...v), hi = Math.max(...v), avg = v.reduce((a, b) => a + b, 0) / v.length;
+    const pace = cur && part < 1 ? now0 / Math.max(part, 0.1) : now0, tr = pace > avg * 1.1 ? ' ↑' : pace < avg * 0.9 ? ' ↓' : ' →';
+    return '<div>' + n + ': ' + (lo === hi ? '≈ ' + k(lo) + ' ₴' : k(lo) + '–' + k(hi) + ' ₴, сер. ' + k(avg)) + ' · зараз ' + k(now0) + (cur ? ' (темп ≈ ' + k(pace) + tr + ')' : tr) + '</div>';
+  }).join('');
+  if (!rows) return '';
+  return '<div class="varblk"><div class="vt">Регулярні, але змінні витрати — для орієнтиру</div>' + rows +
+    '<div>за ' + prev.map(m => NAMES[parseInt(m.slice(5), 10) - 1].toLowerCase()).join(', ') + '; «темп» — скільки вийде до кінця місяця, якщо витрачати так само</div></div>';
+}
 function renderRec(mword) {
-  const list = recList(), paidSum = list.reduce((t, r) => { const p = recPaid(r); return t + (p ? num(p.amount) : 0); }, 0), left = recLeft();
+  const list = recList(), pm = recPaidMap(), paidSum = list.reduce((t, r) => t + (pm[r.id] ? num(pm[r.id].amount) : 0), 0), left = recLeft();
   const today = new Date(), cur = st.month === today.getFullYear() + '-' + pad(today.getMonth() + 1);
   const rows = list.map(r => {
-    const p = recPaid(r), late = !p && cur && r.day && today.getDate() > r.day;
-    return '<div class="rrow ' + (p ? 'ok' : late ? 'late' : '') + '"><button class="rmain" data-act="redit" data-rid="' + esc(r.id) + '"><b>' + esc(r.name) + '</b><small>' + esc(CAT[r.cat] ? CAT[r.cat].name : 'Різне') + (r.day ? ' · до ' + r.day + ' числа' : '') + (r.match ? ' · впізнає «' + esc(r.match) + '»' : '') + '</small></button>' +
-      '<span class="rsum num">' + (p ? '✓ ' + fmt(num(p.amount)) : '≈ ' + fmt(num(r.amount))) + '</span>' +
+    const p = pm[r.id], late = !p && cur && r.day && r.day < 28 && today.getDate() > r.day;
+    return '<div class="rrow ' + (p ? 'ok' : late ? 'late' : '') + '"><button class="rmain" data-act="redit" data-rid="' + esc(r.id) + '"><b>' + (r.who ? whoDot(r.who) + ' ' : '') + esc(r.name) + '</b><small>' + (r.who ? WHO_N(r.who) : 'Спільний') + (r.day ? ' · ' + recDay(r.day) : '') +
+      (r.alt && (r.altM || []).length ? ' · ' + fmt(num(r.alt)) + ' у ' + r.altM.map(x => MON_S[x - 1]).join(', ') : '') + (r.match ? ' · впізнає «' + esc(r.match) + '»' : '') + '</small></button>' +
+      '<span class="rsum num">' + (p ? '✓ ' + fmt(num(p.amount)) : '≈ ' + fmt(recAmt(r))) + '</span>' +
       (p ? '' : '<button class="btn" data-act="rpay" data-rid="' + esc(r.id) + '">Оплатити</button>') + '</div>';
   }).join('');
   return '<div class="top" style="justify-content:flex-start;gap:4px"><button class="back" data-act="back" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>' +
-    '<div><h1 style="font-size:20px">📅 Постійні платежі</h1><div class="small muted">' + cap(mword) + ' · спільні для обох</div></div></div>' +
+    '<div><h1 style="font-size:20px">📅 Постійні платежі</h1><div class="small muted">' + cap(mword) + ' · разом ≈ ' + fmt(list.reduce((t, r) => t + recAmt(r), 0)) + '</div></div></div>' +
     '<div class="list"><section class="card"><div class="grid2"><div class="mtile" style="background:#E3F5E8;border-color:#8FD3A4;color:#1E7A44"><small>Оплачено</small><b class="num">' + fmt(paidSum) + '</b></div>' +
     '<div class="mtile" style="background:#FCE6E4;border-color:#F0A39C;color:#B3261E"><small>Ще оплатити</small><b class="num">' + fmt(left) + '</b></div></div>' +
-    '<div class="small muted ctr">Оплачене відмічається само, якщо в «Витрачено» є запис з ключовим словом (напр. автозапис «Київстар»), або кнопкою «Оплатити».</div></section>' +
+    '<div class="small muted ctr">Оплачене відмічається само, якщо в «Витрачено» є запис з ключовим словом (напр. автозапис «Claude»), або кнопкою «Оплатити». Натисни на платіж, щоб змінити.</div></section>' +
     '<section class="card">' + (rows || '<div class="small muted">Ще немає платежів. Додай оренду, комуналку, зв\'язок, підписки…</div>') +
-    '<button class="btn ghost" data-act="radd" style="width:100%">+ Додати постійний платіж</button></section></div>';
+    '<button class="btn ghost" data-act="radd" style="width:100%">+ Додати постійний платіж</button></section>' + varBlock() + '</div>';
 }
 function openRec(id) {
-  const r = id ? st.lists.rec[id] : null; let cat = r ? r.cat : 'utils';
+  const r = id ? st.lists.rec[id] : null; let cat = r ? r.cat : 'utils', who = r ? (r.who || '') : '';
+  const altM = new Set(r && r.altM ? r.altM : []);
   openSheet(head(r ? 'Змінити платіж' : 'Новий постійний платіж', 'щомісяця') +
     '<label class="f">Назва<input class="note" placeholder="Напр.: Інтернет" value="' + (r ? esc(r.name) : '') + '"></label>' +
-    '<div class="grid2"><label class="f">Орієнтовна сума, ₴<input inputmode="decimal" data-ra value="' + (r ? esc(r.amount) : '') + '"></label><label class="f">До якого числа<input inputmode="numeric" data-rd maxlength="2" value="' + (r && r.day ? r.day : '') + '"></label></div>' +
-    '<label class="f">Як упізнати в записах (необов\'язково)<input class="note" data-rm placeholder="Напр.: Київстар, Ланет" value="' + (r && r.match ? esc(r.match) : '') + '"></label>' +
+    '<div class="f">Чий<div class="sign three" data-rw>' + [['', 'Спільний'], ['s', 'Сергій'], ['d', 'Даша']].map(([k, t]) => '<button type="button" data-wv="' + k + '" class="' + (k === who ? 'on ' + (k || 'both') : '') + '">' + t + '</button>').join('') + '</div></div>' +
+    '<div class="grid2"><label class="f">Орієнтовна сума, ₴<input inputmode="decimal" data-ra value="' + (r ? esc(r.amount) : '') + '"></label><label class="f">До якого числа (28+ = кінець міс.)<input inputmode="numeric" data-rd maxlength="2" value="' + (r && r.day ? r.day : '') + '"></label></div>' +
+    '<label class="f">Інша сума в окремі місяці (необов\'язково)<input inputmode="decimal" data-ralt placeholder="Напр.: 6000" value="' + (r && r.alt ? esc(r.alt) : '') + '"></label>' +
+    '<div class="chips leadgrid" data-rmon>' + MON_S.map((t, i) => '<button type="button" class="chip' + (altM.has(i + 1) ? ' on' : '') + '" data-mv="' + (i + 1) + '" style="--c:#1659C7">' + t + '</button>').join('') + '</div>' +
+    '<label class="f">Як упізнати в записах (необов\'язково, через кому)<input class="note" data-rm placeholder="Напр.: Київстар, Ланет" value="' + (r && r.match ? esc(r.match) : '') + '"></label>' +
     '<div class="f">Стаття' + catChips(cat, ' data-cc') + '</div>' +
     '<button class="btn big" data-save>Зберегти</button>' + (r ? '<button type="button" class="btn ghost del" data-rdel>Видалити платіж</button>' : ''), ov => {
     const name = ov.querySelector('input.note').value.trim(); if (!name) return false;
-    const rec = { name, amount: String(num(ov.querySelector('[data-ra]').value) || 0), day: Math.min(31, parseInt(ov.querySelector('[data-rd]').value, 10) || 0), match: ov.querySelector('[data-rm]').value.trim(), cat };
+    const alt = num(ov.querySelector('[data-ralt]').value) || 0;
+    const rec = { name, who, amount: String(num(ov.querySelector('[data-ra]').value) || 0), day: Math.min(31, parseInt(ov.querySelector('[data-rd]').value, 10) || 0), match: ov.querySelector('[data-rm]').value.trim(), cat,
+      alt: alt ? String(alt) : deleteField(), altM: alt && altM.size ? [...altM].sort((a, b) => a - b) : deleteField() };
     saveLists({ rec: { [id || 'r' + newId()]: rec } }); setTimeout(render, 300);
   });
   const ov = $sheet.firstChild;
   ov.querySelectorAll('[data-cc] [data-c]').forEach(b => b.addEventListener('click', () => { cat = b.dataset.c; b.parentNode.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); }));
+  ov.querySelectorAll('[data-wv]').forEach(b => b.addEventListener('click', () => { who = b.dataset.wv; ov.querySelectorAll('[data-wv]').forEach(z => z.className = z === b ? 'on ' + (z.dataset.wv || 'both') : ''); }));
+  ov.querySelectorAll('[data-mv]').forEach(b => b.addEventListener('click', () => { const v = +b.dataset.mv; altM.has(v) ? altM.delete(v) : altM.add(v); b.classList.toggle('on', altM.has(v)); }));
   const d = ov.querySelector('[data-rdel]'); if (d) d.addEventListener('click', () => { if (confirm('Видалити «' + r.name + '»?')) { saveLists({ rec: { [id]: deleteField() } }); $sheet.innerHTML = ''; setTimeout(render, 300); } });
 }
 function openRecPay(id) {
   const r = st.lists.rec[id];
   openSheet(head('Оплатити: ' + r.name, WHO_N(me) + ' · ' + (CAT[r.cat] ? CAT[r.cat].name : 'Різне')) +
-    '<label class="f">Сума, ₴<input inputmode="decimal" value="' + esc(String(r.amount || '').replace('.', ',')) + '"></label>' +
+    '<label class="f">Сума, ₴<input inputmode="decimal" value="' + esc(String(recAmt(r)).replace('.', ',')) + '"></label>' +
     '<button class="btn big" data-save>Записати оплату</button>', ov => {
     const a = num(ov.querySelector('input').value); if (a <= 0) return false;
     save({ exp: { ['r' + newId()]: { who: me, cat: r.cat || 'other', amount: String(Math.round(a * 100) / 100), note: r.name, at: Date.now(), rec: id } } });
