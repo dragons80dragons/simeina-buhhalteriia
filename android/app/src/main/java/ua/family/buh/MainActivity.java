@@ -287,6 +287,7 @@ public class MainActivity extends Activity {
                 Alarms.sync(MainActivity.this, a);
             } catch (Exception ignored) { }
         }
+        @JavascriptInterface public void setCards(String list) { Store.p(MainActivity.this).edit().putString("cards", list == null ? "" : list).apply(); }
         @JavascriptInterface public void startVoice() { runOnUiThread(MainActivity.this::voiceStart); }
         @JavascriptInterface public void stopVoice() { runOnUiThread(() -> { if (sr != null) sr.stopListening(); }); }
         @JavascriptInterface public void cancelVoice() { runOnUiThread(() -> { if (sr != null) sr.cancel(); }); }
