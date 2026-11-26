@@ -1220,7 +1220,7 @@ function maybeAsk() {
 function cardsSection() {
   const rows = famCards().map(c => '<div class="srow ' + (c.owner === 'd' ? 'byd' : c.owner === 's' ? 'bys' : '') + '"><span class="et"><b class="num">•• ' + esc(c.last4) + ' — ' + esc(cardOwner(c)) + '</b><small>' + esc([c.note, c.acct ? 'рахунок …' + c.acct : '', (CARD_ROLES.find(r => r[0] === (c.role || '')) || ['', ''])[1]].filter(Boolean).join(' · ') || 'картка') + '</small></span>' +
     '<button type="button" class="ibtn del" data-act="cdel" data-cid="' + esc(c.id) + '" aria-label="Видалити">✕</button></div>').join('');
-  return '<section class="card"><div class="vhead"><span class="si">💳</span><span class="sc"><b>Картки нашої сім\'ї</b><small>Перекази між цими картками не записуються. Зарплата/аванс на картку «Виплати …» і пенсія записуються в прибутки самі (з/п до 12 числа — за минулий місяць). Переказ стороннім — витрата з уточненням.</small></span></div>' +
+  return '<section class="card"><div class="vhead"><span class="si">💳</span><span class="sc"><b>Картки нашої сім\'ї</b><small>Перекази між цими картками не записуються. Зарплата/аванс на картку «Виплати …» і пенсія записуються в прибутки самі (до 15 числа включно — з/п за минулий місяць, з 16-го — аванс поточного). Переказ стороннім — витрата з уточненням.</small></span></div>' +
     (rows ? '<div class="shist">' + rows + '</div>' : '<div class="small muted">Ще немає карток.</div>') +
     '<button class="btn ghost" data-act="cadd" style="width:100%">+ Додати картку</button></section>';
 }
@@ -1372,8 +1372,8 @@ function parseIncome(raw, who, at0) {
   if (pension && owner === 's') slot = 's_pension';
   else if (card && (card.role === 'pay_rw' || card.role === 'pay_ms')) {
     const base = card.role === 'pay_rw' ? 's_rw_' : 's_ms_';
-    const kind = /ПРЕМІ/.test(U) && base === 's_rw_' ? 'prem' : /БАНКЕТ/.test(U) && base === 's_rw_' ? 'banq' : /АВАНС/.test(U) ? 'av' : /ЗАРПЛАТ|ЗАРОБІТН|З\/П|\bЗП\b/.test(U) ? 'zp' : d.getDate() <= 12 ? 'zp' : 'av';
-    if (kind === 'zp' && d.getDate() <= 12) month = prevMonth(cur);
+    const kind = /ПРЕМІ/.test(U) && base === 's_rw_' ? 'prem' : /БАНКЕТ/.test(U) && base === 's_rw_' ? 'banq' : /АВАНС/.test(U) ? 'av' : /ЗАРПЛАТ|ЗАРОБІТН|З\/П|\bЗП\b/.test(U) ? 'zp' : d.getDate() <= 15 ? 'zp' : 'av';
+    if (kind === 'zp' && d.getDate() <= 15) month = prevMonth(cur);
     slot = base === 's_ms_' ? (kind === 'av' ? 's_ms_av' : 's_ms_zp') : kind === 'prem' ? 's_rw_prem' : kind === 'banq' ? 's_rw_banq' : 's_rw_' + kind + '_card';
   }
   return { income: true, amount: Math.round(amount * 100) / 100, owner, slot, month, card: card ? card.last4 : '', note: (card ? '•• ' + card.last4 + ' · ' : '') + raw.replace(/(БАЛ\.?|БАЛАНС|ДОСТУПНО)[^]*$/i, '').slice(0, 60) };

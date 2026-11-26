@@ -1,4 +1,4 @@
-const CACHE = 'pributky-v36';
+const CACHE = 'pributky-v37';
 const SHELL = ['./', 'index.html', 'style.css?v=34', 'app.js?v=34', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
