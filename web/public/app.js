@@ -192,7 +192,7 @@ const listsRef = () => doc(db, 'families', fid, 'lists', 'main');
 let unsubLists = null;
 function subscribeLists() {
   if (unsubLists) unsubLists();
-  unsubLists = onSnapshot(listsRef(), snap => { st.lists = snap.data() || {}; try { if (NATIVE && window.Android.setCards) window.Android.setCards(famCards().map(c => c.last4).join(',')); } catch (e) {} checkAlarms(); if (st.tab === 'lists') render(); }, () => {});
+  unsubLists = onSnapshot(listsRef(), snap => { st.lists = snap.data() || {}; try { if (NATIVE && window.Android.setCards) window.Android.setCards(famCards().flatMap(c => [c.last4, c.acct]).filter(Boolean).join(',')); } catch (e) {} checkAlarms(); if (st.tab === 'lists') render(); }, () => {});
 }
 const saveLists = patch => setDoc(listsRef(), patch, { merge: true }).catch(e => alert('Не збережено: ' + e.message));
 const save = patch => setDoc(monthRef(), patch, { merge: true }).catch(e => alert('Не збережено: ' + e.message));
@@ -756,14 +756,17 @@ function subscribeInbox() {
 const recentAuto = [];
 let inboxChain = Promise.resolve();
 function handleInbox(id, x) { inboxChain = inboxChain.then(() => handleInbox1(id, x)).catch(() => {}); }
+// банки інколи пишуть латинськими a/i/o всередині українських слів («зaрaховaно») — повертаємо кирилицю
+const LAT2CYR = { a: 'а', e: 'е', i: 'і', o: 'о', p: 'р', c: 'с', x: 'х', y: 'у', A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', I: 'І', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х' };
+const deLat = t => String(t).replace(/[A-Za-zА-Яа-яІіЇїЄєҐґ']+/g, w => /[А-Яа-яІіЇїЄєҐґ]/.test(w) ? w.replace(/[aeiopcxyABCEHIKMOPTX]/g, ch => LAT2CYR[ch]) : w);
 async function handleInbox1(id, x) {
   if (handledInbox.has(id)) return; handledInbox.add(id);
   let at = num(x.at); at = at > 1e12 ? at : at > 1e9 ? at * 1000 : Date.now();
   const who = x.who === 'd' ? 'd' : 's';
-  const norm = String(x.text || '').replace(/\s+/g, ' ').trim();
-  const inc = parseIncome(norm, who);
+  const norm = deLat(String(x.text || '')).replace(/\s+/g, ' ').trim();
+  const inc = parseIncome(norm, who, at);
   const tr = inc ? null : parseTransfer(norm, who);
-  const r = inc || tr ? null : parseBankPush(x.text);
+  const r = inc || tr ? null : parseBankPush(deLat(String(x.text || '')));
   if (r && !r.test) { const k = mkey(r.note), rc = shopRules()[k]; r.mkey = k; if (rc && CAT[rc]) { r.cat = rc; r.catSure = true; } }
   try {
     if (inc && inc.income) await handleIncome(id, inc, at);
@@ -1215,7 +1218,7 @@ function maybeAsk() {
 
 // --- картки сім'ї (у налаштуваннях автозапису) ---
 function cardsSection() {
-  const rows = famCards().map(c => '<div class="srow ' + (c.owner === 'd' ? 'byd' : c.owner === 's' ? 'bys' : '') + '"><span class="et"><b class="num">•• ' + esc(c.last4) + ' — ' + esc(cardOwner(c)) + '</b><small>' + esc([c.note, (CARD_ROLES.find(r => r[0] === (c.role || '')) || ['', ''])[1]].filter(Boolean).join(' · ') || 'картка') + '</small></span>' +
+  const rows = famCards().map(c => '<div class="srow ' + (c.owner === 'd' ? 'byd' : c.owner === 's' ? 'bys' : '') + '"><span class="et"><b class="num">•• ' + esc(c.last4) + ' — ' + esc(cardOwner(c)) + '</b><small>' + esc([c.note, c.acct ? 'рахунок …' + c.acct : '', (CARD_ROLES.find(r => r[0] === (c.role || '')) || ['', ''])[1]].filter(Boolean).join(' · ') || 'картка') + '</small></span>' +
     '<button type="button" class="ibtn del" data-act="cdel" data-cid="' + esc(c.id) + '" aria-label="Видалити">✕</button></div>').join('');
   return '<section class="card"><div class="vhead"><span class="si">💳</span><span class="sc"><b>Картки нашої сім\'ї</b><small>Перекази між цими картками не записуються. Зарплата/аванс на картку «Виплати …» і пенсія записуються в прибутки самі (з/п до 12 числа — за минулий місяць). Переказ стороннім — витрата з уточненням.</small></span></div>' +
     (rows ? '<div class="shist">' + rows + '</div>' : '<div class="small muted">Ще немає карток.</div>') +
@@ -1227,12 +1230,14 @@ function openCardAdd() {
     '<label class="f">Останні 4 цифри<input inputmode="numeric" maxlength="4" placeholder="1234"></label>' +
     '<div class="f">Кому належить<div class="sign three" data-own>' + [['s', 'Сергій'], ['d', 'Даша'], ['x', 'Інше']].map(([k, t]) => '<button type="button" data-ow="' + k + '" class="' + (k === owner ? 'on ' + (k === 'x' ? 'both' : k) : '') + '">' + t + '</button>').join('') + '</div></div>' +
     '<label class="f" data-oname style="display:none">Чия (ім\'я)<input class="oname" placeholder="Напр.: мама, Кіра"></label>' +
+    '<label class="f">Останні 4 цифри рахунку (необов\'язково — якщо банк у SMS пише рахунок, а не картку)<input class="acct" inputmode="numeric" maxlength="4" placeholder="Напр.: 6591"></label>' +
     '<label class="f">Примітка<input class="note" placeholder="Напр.: Приват Універсальна, кредитка"></label>' +
     '<label class="f">Що сюди приходить<select class="lsel" data-role>' + CARD_ROLES.map(([k, t]) => '<option value="' + k + '">' + t + '</option>').join('') + '</select></label>' +
     '<button class="btn big" data-save>Додати</button>', ov => {
-    const l4 = ov.querySelector('input[inputmode]');
+    const l4 = ov.querySelector('input[inputmode]:not(.acct)');
     if (!/^\d{4}$/.test(l4.value.trim())) { l4.classList.add('need'); l4.focus(); return false; }
     const c = { last4: l4.value.trim(), owner: owner === 'x' ? 'x' : owner, ownerName: owner === 'x' ? ov.querySelector('input.oname').value.trim() : '', note: ov.querySelector('input.note').value.trim(), role: ov.querySelector('[data-role]').value, at: Date.now() };
+    const ac = ov.querySelector('input.acct').value.trim(); if (/^\d{4}$/.test(ac)) c.acct = ac;
     saveLists({ cards: { ['c' + newId()]: c } });
     setTimeout(render, 300);
   });
@@ -1339,8 +1344,9 @@ const CARD_ROLES = [['', 'Звичайна'], ['pay_rw', 'Виплати Рів�
 const slotLabel = k => { for (const w of ['s', 'd']) for (const g of SLOTS[w]) for (const x of g.slots) if (x[0] === k) return g.name + ' · ' + x[1] + (x[2] ? ' (' + x[2].split(',')[0] + ')' : ''); return k; };
 const slotOwner = k => (k[0] === 'd' ? 'd' : 's');
 const monthWord = m => NAMES[parseInt(m.slice(5), 10) - 1];
-function parseIncome(raw, who) {
-  const U = raw.toUpperCase();
+function parseIncome(raw, who, at0) {
+  raw = deLat(raw);
+  const U = raw.toUpperCase().replace(/ЗАРОБІТНА ПЛАТА\s*\/\s*ІНШІ ВИПЛАТИ/g, 'НАДХОДЖЕННЯ');
   const words = /ЗАРАХУВАН|НАДХОДЖ|ЗАРПЛАТ|ЗАР\.?\s?ПЛАТ|АВАНС|ПЕНСІ|ПФУ|ВИПЛАТ|ПРЕМІ|ЗАРОБІТН/.test(U);
   let amount = 0, sign = '', m; AMT.lastIndex = 0;
   while ((m = AMT.exec(raw))) {
@@ -1350,16 +1356,18 @@ function parseIncome(raw, who) {
   }
   if (!(amount > 0) || sign === '-' || sign === '−') return null;
   const refs = [...raw.matchAll(/(?:\*|•|×|x|X)+\s?(\d{4})\b|\b\d{4}\s?\*{2,}\s?\*{0,4}\s?(\d{4})\b/g)].map(z => z[1] || z[2]);
-  const cards = famCards(), byL4 = l => cards.find(c => c.last4 === l);
+  const acc = [...raw.matchAll(/РАХУН[А-ЯІЇЄа-яіїє]*\s*(?:№\s*)?(?:UA)?\d*(\d{4})(?:\.\d{3})?\b/gi)].map(z => z[1]);
+  refs.push(...acc);
+  const cards = famCards(), byL4 = l => cards.find(c => c.last4 === l || c.acct === l);
   const card = refs.map(byL4).find(Boolean) || null;
   const pension = /ПЕНСІ|ПФУ|ПЕНСІЙН/.test(U) || (card && card.role === 'pension');
   const payCard = card && /^pay_/.test(card.role || '');
   if (!words && !payCard && !pension) return null;
   // поповнення з власної картки — не дохід
-  if (refs.filter(r => !card || r !== card.last4).some(r => byL4(r)) && !pension) return { ignore: true };
+  if (refs.filter(r => !card || (r !== card.last4 && r !== card.acct)).some(r => byL4(r)) && !pension) return { ignore: true };
   if (/ПЕРЕКАЗ/.test(U) && !payCard && !pension && !/ЗАРПЛАТ|АВАНС|ВИПЛАТ|ПРЕМІ/.test(U)) return null; // звичайний переказ — інша гілка
   const owner = card && (card.owner === 's' || card.owner === 'd') ? card.owner : who;
-  const at = Date.now(), d = new Date(at), cur = d.getFullYear() + '-' + pad(d.getMonth() + 1);
+  const at = at0 || Date.now(), d = new Date(at), cur = d.getFullYear() + '-' + pad(d.getMonth() + 1);
   let slot = '', month = cur;
   if (pension && owner === 's') slot = 's_pension';
   else if (card && (card.role === 'pay_rw' || card.role === 'pay_ms')) {
@@ -1374,6 +1382,7 @@ async function handleIncome(id, inc, at) {
   const ref = m => doc(db, 'families', fid, 'months', m);
   if (inc.slot) {
     const cur = num(((mdata(inc.month).vals) || {})[inc.slot]);
+    if (cur && Math.abs(cur - inc.amount) < 0.01) { if (inc.owner === me) toast('✓ ' + fmt(inc.amount) + ' вже записано в ' + slotLabel(inc.slot) + ' за ' + monthWord(inc.month)); return; }
     if (!cur) {
       await setDoc(ref(inc.month), { vals: { [inc.slot]: String(inc.amount) }, ilog: { ['i' + id]: { slot: inc.slot, amount: String(inc.amount), at, who: inc.owner, note: inc.note } } }, { merge: true });
       if (inc.owner === me) toast('⚡ Зараховано: ' + fmt(inc.amount) + ' → ' + slotLabel(inc.slot) + ' за ' + monthWord(inc.month));
