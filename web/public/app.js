@@ -368,7 +368,7 @@ function renderExp(mword) {
     '<div class="tot d"><span>Витратила Даша</span><b>' + fmt(td) + '</b></div>' +
     carryBtn() +
     '<div class="famrow"><div><div class="muted" style="font-size:13px">Витрачено сім\'єю за ' + mword + '</div><div class="family">' + fmt(total) + '</div></div>' + stashBtn() + '</div>' +
-    '<div class="ctr" style="padding:2px 4px 0"><div class="muted small">Залишок (прибуток + залишок − витрати)</div><div class="num" style="font-size:20px;font-weight:700;color:' + (inc - total < 0 ? '#B3261E' : '#1E7A44') + '">' + fmt(inc - total) + '</div>' + (recLeft() > 0 ? '<div class="small muted" style="margin-top:6px">Ще постійні платежі: −' + fmt(recLeft()) + ' → вільно <b style="color:' + (inc - total - recLeft() < 0 ? '#B3261E' : '#1E7A44') + '">' + fmt(inc - total - recLeft()) + '</b></div>' : '') + '</div></section>' +
+    '<div class="ctr" style="padding:2px 4px 0"><div class="muted small">Залишок (прибуток + залишок − витрати)</div><div class="num" style="font-size:20px;font-weight:700;color:' + (inc - total < 0 ? '#B3261E' : '#1E7A44') + '">' + fmt(inc - total) + '</div>' + '</div></section>' +
     '</div>';
 }
 
@@ -1294,7 +1294,7 @@ const recAmt = (r, m = st.month) => num((r.alt && (r.altM || []).includes(parseI
 function recPaidMap() {
   const ex = Object.entries(st.data.exp || {}).map(([id, e]) => ({ id, ...e })), used = new Set(), out = {};
   const list = recList();
-  for (const r of list) { const e = ex.find(e => e.rec === r.id); if (e) { out[r.id] = e; used.add(e.id); } }
+  for (const r of list) { const e = ex.find(e => e.rec === r.id); if (e) { out[r.id] = e; used.add(e.id); } else if (r.paidM && r.paidM[st.month]) out[r.id] = { amount: recAmt(r), manual: true }; }
   for (const r of list) {
     if (out[r.id] || !r.match) continue;
     const ks = r.match.toLowerCase().split(/\s*,\s*/).filter(Boolean);
@@ -1304,6 +1304,7 @@ function recPaidMap() {
   return out;
 }
 function recPaid(r) { return recPaidMap()[r.id] || null; }
+const recManual = r => !!(r.paidM && r.paidM[st.month]);
 function recLeft() { const pm = recPaidMap(); return recList().filter(r => !pm[r.id]).reduce((t, r) => t + recAmt(r), 0); }
 const recDay = d => (d >= 28 ? 'наприкінці місяця' : 'до ' + d + ' числа');
 // регулярні змінні витрати — діапазон за останні місяці
@@ -1332,7 +1333,7 @@ function renderRec(mword) {
     const p = pm[r.id], late = !p && cur && r.day && r.day < 28 && today.getDate() > r.day;
     return '<div class="rrow ' + (p ? 'ok' : late ? 'late' : '') + '"><button class="rmain" data-act="redit" data-rid="' + esc(r.id) + '"><b>' + (r.who ? whoDot(r.who) + ' ' : '') + esc(r.name) + '</b><small>' + (r.who ? WHO_N(r.who) : 'Спільний') + (r.day ? ' · ' + recDay(r.day) : '') +
       (r.alt && (r.altM || []).length ? ' · ' + fmt(num(r.alt)) + ' у ' + r.altM.map(x => MON_S[x - 1]).join(', ') : '') + (r.match ? ' · впізнає «' + esc(r.match) + '»' : '') + '</small></button>' +
-      '<span class="rsum num">' + (p ? '✓ ' + fmt(num(p.amount)) : '≈ ' + fmt(recAmt(r))) + '</span>' +
+      '<span class="rsum num">' + (p ? '✓ ' + fmt(num(p.amount)) + (p.manual ? '<small class="muted" style="display:block;font-weight:400;font-size:11px;text-align:right">вручну</small>' : '') : '≈ ' + fmt(recAmt(r))) + '</span>' +
       (p ? '' : '<button class="btn" data-act="rpay" data-rid="' + esc(r.id) + '">Оплатити</button>') + '</div>';
   }).join('');
   return '<div class="top" style="justify-content:flex-start;gap:4px"><button class="back" data-act="back" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>' +
@@ -1347,6 +1348,7 @@ function openRec(id) {
   const r = id ? st.lists.rec[id] : null; let cat = r ? r.cat : 'utils', who = r ? (r.who || '') : '';
   const altM = new Set(r && r.altM ? r.altM : []);
   openSheet(head(r ? 'Змінити платіж' : 'Новий постійний платіж', 'щомісяця') +
+    (r ? '<div class="vhead" style="margin:6px 0"><span class="sc"><b>Оплачено за ' + monthWord(st.month).toLowerCase() + '</b><small>Лише відмітка, у «Витрачено» нічого не записується</small></span><button type="button" class="tgl' + (recManual(r) ? ' on' : '') + '" data-rpm aria-label="Оплачено"><i></i></button></div>' : '') +
     '<label class="f">Назва<input class="note" placeholder="Напр.: Інтернет" value="' + (r ? esc(r.name) : '') + '"></label>' +
     '<div class="f">Чий<div class="sign three" data-rw>' + [['', 'Спільний'], ['s', 'Сергій'], ['d', 'Даша']].map(([k, t]) => '<button type="button" data-wv="' + k + '" class="' + (k === who ? 'on ' + (k || 'both') : '') + '">' + t + '</button>').join('') + '</div></div>' +
     '<div class="grid2"><label class="f">Орієнтовна сума, ₴<input inputmode="decimal" data-ra value="' + (r ? esc(r.amount) : '') + '"></label><label class="f">До якого числа (28+ = кінець міс.)<input inputmode="numeric" data-rd maxlength="2" value="' + (r && r.day ? r.day : '') + '"></label></div>' +
@@ -1365,6 +1367,7 @@ function openRec(id) {
   ov.querySelectorAll('[data-cc] [data-c]').forEach(b => b.addEventListener('click', () => { cat = b.dataset.c; b.parentNode.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); }));
   ov.querySelectorAll('[data-wv]').forEach(b => b.addEventListener('click', () => { who = b.dataset.wv; ov.querySelectorAll('[data-wv]').forEach(z => z.className = z === b ? 'on ' + (z.dataset.wv || 'both') : ''); }));
   ov.querySelectorAll('[data-mv]').forEach(b => b.addEventListener('click', () => { const v = +b.dataset.mv; altM.has(v) ? altM.delete(v) : altM.add(v); b.classList.toggle('on', altM.has(v)); }));
+  const pmb = ov.querySelector('[data-rpm]'); if (pmb) pmb.addEventListener('click', () => { const on = !pmb.classList.contains('on'); pmb.classList.toggle('on', on); saveLists({ rec: { [id]: { paidM: { [st.month]: on ? true : deleteField() } } } }); setTimeout(render, 300); });
   const d = ov.querySelector('[data-rdel]'); if (d) d.addEventListener('click', () => { if (confirm('Видалити «' + r.name + '»?')) { saveLists({ rec: { [id]: deleteField() } }); $sheet.innerHTML = ''; setTimeout(render, 300); } });
 }
 function openRecPay(id) {
