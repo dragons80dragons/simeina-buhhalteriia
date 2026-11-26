@@ -814,10 +814,10 @@ const voiceOn = () => ls.get('voice') === '1';
 const voiceSupported = () => NATIVE ? typeof window.Android.startVoice === 'function' : !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 function voiceSection() {
   const ok = voiceSupported(), on = voiceOn() && ok;
-  return '<section class="card"><div class="vhead"><span class="si">🎤</span><span class="sc"><b>Голосовий запис витрат</b><small>' +
-    (ok ? 'Довго натисни вкладку «Витрачено» і скажи: спершу суму, потім на що. Стаття визначається сама (якщо не вдалось — «Різне»), змінити можна вручну.' : 'Потрібне оновлення застосунку — натисни «Перевірити оновлення застосунку» внизу.') +
+  return '<section class="card"><div class="vhead"><span class="si">🎤</span><span class="sc"><b>Голосовий запис</b><small>' +
+    (ok ? 'Довго натисни вкладку «Витрачено» і скажи: спершу суму, потім на що — стаття визначається сама (якщо не вдалось — «Різне»). Довго натисни «Купити / Зробити» і скажи «потрібно купити…», «потрібно зробити…» або «заплановано…» — запишеться у відповідний список (кількість товарів теж). Ці слова працюють і з вкладки «Витрачено».' : 'Потрібне оновлення застосунку — натисни «Перевірити оновлення застосунку» внизу.') +
     '</small></span><button class="tgl' + (on ? ' on' : '') + '" data-act="vtoggle"' + (ok ? '' : ' disabled') + ' aria-label="Голосовий запис"><i></i></button></div>' +
-    (on ? '<button class="btn ghost" data-act="vtry" style="width:100%">Спробувати зараз</button>' : '') + '</section>';
+    (on ? '<div class="grid2"><button class="btn ghost" data-act="vtry">🎤 Витрата</button><button class="btn ghost" data-act="vtryl">🎤 Купити / Зробити</button></div>' : '') + '</section>';
 }
 const UNITS = { 'нуль': 0, 'один': 1, 'одна': 1, 'одну': 1, 'два': 2, 'дві': 2, 'три': 3, 'чотири': 4, "п'ять": 5, 'пять': 5, 'шість': 6, 'сім': 7, 'вісім': 8, "дев'ять": 9, 'девять': 9,
   'десять': 10, 'одинадцять': 11, 'дванадцять': 12, 'тринадцять': 13, 'чотирнадцять': 14, "п'ятнадцять": 15, 'пятнадцять': 15, 'шістнадцять': 16, 'сімнадцять': 17, 'вісімнадцять': 18, "дев'ятнадцять": 19, 'девятнадцять': 19,
@@ -851,7 +851,7 @@ function parseVoice(text) {
   note = note ? note[0].toUpperCase() + note.slice(1) : '';
   return got && amount > 0 ? { amount: Math.round(amount * 100) / 100, note } : null;
 }
-let vrec = null, vText = '';
+let vrec = null, vText = '', vMode = 'exp';
 function voiceUI(state, text) {
   let ov = document.getElementById('vov');
   if (state === 'close') { if (ov) ov.remove(); return; }
@@ -883,8 +883,171 @@ function voiceCat(note) {
   for (const [re, c] of VOICE_CATS) if (re.test(note)) return c;
   const c2 = catByShop(note); return c2.cat || 'other';
 }
+// ---------- голосом у «Купити / Зробити / Заплановано» ----------
+const VL_TRIG = /(?:^|[\s,.;!?])(?:(?:мені|нам|ще|треба|також)\s+)?(потрібно|потрібен|потрібна|потрібні|треба|необхідно|слід)\s+(купити|придбати|зробити)|(?:^|[\s,.;!?])(заплановано|запланувати|заплануй|нагадай(?:\s+мені)?|нагадування)(?=[\s,.:]|$)|(?:^|[\s,.;!?])(купити|зробити)(?=\s*[:,])/gi;
+const VL_NUM = { ...UNITS, 'пів': 0.5, 'півтора': 1.5, 'одне': 1, 'одного': 1, 'двоє': 2, 'двох': 2, 'троє': 3, 'трьох': 3, 'четверо': 4, 'чотирьох': 4, "п'ятеро": 5, 'десяток': 10, 'дюжину': 12, 'пару': 2, 'пара': 2 };
+const VL_UNITS = [
+  [/^(кілограм[а-яіїє]*|кіло|кг)$/i, 'кг'], [/^(грам[а-яіїє]*|гр|г)$/i, 'г'], [/^(літр[а-яіїє]*|л)$/i, 'л'], [/^(мілілітр[а-яіїє]*|мл)$/i, 'мл'],
+  [/^(штук[а-яіїє]*|шт)$/i, 'шт'], [/^(пачк[а-яіїє]*|пачок|пач)$/i, 'пач.'], [/^(пакет[а-яіїє]*|пак)$/i, 'пак.'], [/^(пляшк[а-яіїє]*|пляшок)$/i, 'пляш.'],
+  [/^(банк[аиу]|банок)$/i, 'бан.'], [/^(упаковк[а-яіїє]*|упаковок|уп)$/i, 'уп.'], [/^(метр[а-яіїє]*|м)$/i, 'м'], [/^(рулон[а-яіїє]*)$/i, 'рул.'],
+  [/^(коробк[а-яіїє]*|коробок)$/i, 'кор.'], [/^(десят[ок|ка|ки])/i, 'дес.'], [/^(буханц[а-яіїє]*|буханок|батон[а-яіїє]*)$/i, '']
+];
+const vlCap = s => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const vlClean = s => s.replace(/^[\s,.:;!?—-]+|[\s,.:;!?—-]+$/g, '').replace(/\s{2,}/g, ' ');
+// число на початку масиву слів: [значення, скільки слів з'їдено]
+function vlNum(ws, i) {
+  let j = i, total = 0, cur = 0, got = false;
+  for (; j < ws.length; j++) {
+    const w = ws[j].toLowerCase().replace(/[.,!?:;]/g, '');
+    if (/^\d+(?:[.,]\d+)?$/.test(w)) { if (got && cur) break; cur += parseFloat(w.replace(',', '.')); got = true; continue; }
+    if (w in VL_NUM) { cur += VL_NUM[w]; got = true; continue; }
+    if (/^тисяч/.test(w) && got) { total += cur * 1000; cur = 0; continue; }
+    if ((w === 'з' || w === 'і') && got && /^(половин|пів)/.test((ws[j + 1] || '').toLowerCase())) { cur += 0.5; j++; continue; }
+    break;
+  }
+  return got ? [total + cur, j - i] : null;
+}
+// одна позиція покупки: «два літри молока» → «Молоко — 2 л»; «хліб 2 штуки» → «Хліб — 2 шт»
+function vlBuyItem(raw) {
+  let ws = vlClean(raw).split(/\s+/).filter(Boolean);
+  if (!ws.length) return null;
+  let qty = null, unit = '', front = false;
+  const unitAt = k => { const w = (ws[k] || '').replace(/[.,]/g, ''); for (const [re, u] of VL_UNITS) if (re.test(w)) return u; return null; };
+  // кількість на початку
+  let n = vlNum(ws, 0);
+  if (n) { qty = n[0]; front = true; ws = ws.slice(n[1]); const u = unitAt(0); if (u !== null && ws.length > 1) { unit = u; ws = ws.slice(1); } }
+  else if (/^пів/i.test(ws[0]) && ws[0].length > 3 && unitAt(0) === null) { const u2 = ws[0].slice(3); for (const [re, u] of VL_UNITS) if (re.test(u2)) { qty = 0.5; unit = u; front = true; ws = ws.slice(1); break; } }
+  else { const u = unitAt(0); if (u && ws.length > 1 && u !== '') { qty = 1; unit = u; front = true; ws = ws.slice(1); } }
+  // кількість у кінці: «хліб 2 штуки», «молоко два літри»
+  if (qty === null && ws.length > 1) {
+    for (let k = 1; k < ws.length; k++) {
+      const n2 = vlNum(ws, k);
+      if (n2 && k + n2[1] >= ws.length - 1) {
+        const u = k + n2[1] < ws.length ? unitAt(k + n2[1]) : '';
+        if (u === null) continue;
+        qty = n2[0]; unit = u; ws = ws.slice(0, k); break;
+      }
+    }
+  }
+  const name = vlCap(vlClean(ws.join(' ').replace(/^(ще|і|та|також)\s+/i, '')));
+  if (!name) return null;
+  const q = qty !== null ? String(Math.round(qty * 100) / 100).replace('.', ',') + (unit ? ' ' + unit : (qty === 1 ? '' : ' шт')) : '';
+  const show = q && !(qty === 1 && !unit);
+  const qf = qty !== null ? String(Math.round(qty * 100) / 100).replace('.', ',') + (unit ? ' ' + unit : '') : '';
+  return { text: !show ? name : front ? qf + ' ' + name[0].toLowerCase() + name.slice(1) : name + ' — ' + q, qty, unit, name };
+}
+function vlSplitBuy(s) {
+  return s.split(/\s*[,;]\s*|\s+(?:і|й|та|ще|а також|також|плюс)\s+(?=\S)/i).map(vlBuyItem).filter(Boolean);
+}
+const VL_ORD = { 'першій': 1, 'другій': 2, 'третій': 3, 'четвертій': 4, "п'ятій": 5, 'пятій': 5, 'шостій': 6, 'сьомій': 7, 'восьмій': 8, "дев'ятій": 9, 'девятій': 9, 'десятій': 10, 'одинадцятій': 11, 'дванадцятій': 12,
+  'тринадцятій': 13, 'чотирнадцятій': 14, "п'ятнадцятій": 15, 'шістнадцятій': 16, 'сімнадцятій': 17, 'вісімнадцятій': 18, "дев'ятнадцятій": 19, 'двадцятій': 20, 'опівдні': 12, 'полудні': 12 };
+const VL_MON = ['січ', 'лют', 'берез', 'квіт', 'трав', 'черв', 'лип', 'серп', 'верес', 'жовт', 'листопад', 'груд'];
+const VL_WD = [['неділ', 0], ['понеділ', 1], ['вівтор', 2], ['серед', 3], ['середу', 3], ['четвер', 4], ["п'ятниц", 5], ['пятниц', 5], ['субот', 6]];
+// дата й час з тексту: повертає { when|null, hasTime, text без дати/часу }
+function vlWhen(s, now = new Date()) {
+  let t = ' ' + s + ' ', day = null, h = null, mi = 0, rel = null;
+  const cut = re => { const m = t.match(re); if (m) t = t.replace(m[0], ' '); return m; };
+  let m;
+  if ((m = cut(/\sчерез\s+(\S+(?:\s+\S+)?)\s+(хвилин[а-яіїє]*|годин[а-яіїє]*|день|дні|днів|тижд[а-яіїє]*)(?=[\s,.])/i))) {
+    const n = vlNum(m[1].split(/\s+/), 0); const v = n ? n[0] : (/^(хвилин|годин|день|тижд)/i.test(m[1]) ? 1 : 1);
+    const mul = /^хв/i.test(m[2]) ? 60000 : /^год/i.test(m[2]) ? 3600000 : /^тиж/i.test(m[2]) ? 7 * 864e5 : 864e5;
+    rel = now.getTime() + v * mul;
+  } else if ((m = cut(/\sчерез\s+(хвилину|годину|півгодини|день|тиждень)(?=[\s,.])/i))) {
+    rel = now.getTime() + ({ 'хвилину': 60000, 'годину': 3600000, 'півгодини': 1800000, 'день': 864e5, 'тиждень': 7 * 864e5 })[m[1].toLowerCase()];
+  }
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (cut(/\sпіслязавтра(?=[\s,.])/i)) day = new Date(base.getTime() + 2 * 864e5);
+  else if (cut(/\sзавтра(?=[\s,.])/i)) day = new Date(base.getTime() + 864e5);
+  else if (cut(/\sсьогодні(?=[\s,.])/i)) day = base;
+  if (!day && (m = cut(/\s(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?(?=[\s,.])/))) {
+    const Y = m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : now.getFullYear(); day = new Date(Y, +m[2] - 1, +m[1]);
+    if (!m[3] && day < base) day = new Date(Y + 1, +m[2] - 1, +m[1]);
+  }
+  if (!day && (m = cut(new RegExp('\\s(\\d{1,2}|[а-яіїє\']+)(?:-?го|-е)?\\s+(' + VL_MON.join('|') + ')[а-яіїє]*(?=[\\s,.])', 'i')))) {
+    let dn = /^\d/.test(m[1]) ? +m[1] : null;
+    if (dn === null) { const w = m[1].toLowerCase(); const ord = { 'першого': 1, 'другого': 2, 'третього': 3, 'четвертого': 4, "п'ятого": 5, 'шостого': 6, 'сьомого': 7, 'восьмого': 8, "дев'ятого": 9, 'десятого': 10 }; dn = ord[w] || null; }
+    if (dn) { const mo = VL_MON.findIndex(x => m[2].toLowerCase().startsWith(x)); day = new Date(now.getFullYear(), mo, dn); if (day < base) day = new Date(now.getFullYear() + 1, mo, dn); }
+  }
+  if (!day) for (const [w, wd] of VL_WD) {
+    const re = new RegExp('\\s(?:(?:в|у|во)\\s+)?(?:наступн[а-яіїє]*\\s+)?' + w + '[а-яіїє]*(?=[\\s,.])', 'i');
+    if ((m = cut(re))) { let diff = (wd - now.getDay() + 7) % 7; if (diff === 0) diff = 7; day = new Date(base.getTime() + diff * 864e5); break; }
+  }
+  // час
+  if ((m = cut(/\s(?:о|об|на|в|у)?\s*(\d{1,2})[:.](\d{2})(?:\s*годин[а-яіїє]*)?(?=[\s,.])/i))) { h = +m[1]; mi = +m[2]; }
+  else if ((m = cut(/\s(?:о|об|на)\s+(\d{1,2})(?:\s+(\d{2}))?(?:\s*(?:годин[а-яіїє]*|год))?(?:\s+(\d{1,2})\s*хв[а-яіїє]*)?(?=[\s,.])/i))) { h = +m[1]; mi = +(m[2] || m[3] || 0); }
+  else if ((m = t.match(/\s(?:о|об|в|у)\s+([а-яіїє']+)(?:\s+([а-яіїє']+|\d{2}))?(?:\s+хвилин[а-яіїє]*)?(?=[\s,.])/i)) && VL_ORD[m[1].toLowerCase()] !== undefined) {
+    h = VL_ORD[m[1].toLowerCase()]; let used = m[0];
+    if (m[2]) { const n = /^\d{2}$/.test(m[2]) ? [+m[2]] : vlNum([m[2]], 0); if (n && n[0] < 60) mi = n[0]; else used = m[0].slice(0, m[0].lastIndexOf(m[2])); }
+    t = t.replace(used, ' ');
+  }
+  else if ((m = cut(/\s(опівдні|в обід)(?=[\s,.])/i))) h = 12;
+  if (h !== null) {
+    if (cut(/\s(вечора|ввечері|дня|по обіді|після обіду)(?=[\s,.])/i) && h < 12) h += 12;
+    else cut(/\s(ранку|зранку|вранці|ночі)(?=[\s,.])/i);
+  } else {
+    if (cut(/\s(зранку|вранці)(?=[\s,.])/i)) h = 9; else if (cut(/\s(ввечері|увечері)(?=[\s,.])/i)) h = 19; else if (cut(/\s(вдень|по обіді)(?=[\s,.])/i)) h = 14;
+  }
+  let when = null;
+  if (rel) when = rel;
+  else if (h !== null && h < 24 && mi < 60) {
+    const d0 = day || base; when = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), h, mi).getTime();
+    if (!day && when <= now.getTime()) when += 864e5;
+  } else if (day) when = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0).getTime();
+  return { when, hasTime: !!rel || h !== null, text: vlCap(vlClean(t.replace(/\s+(о|об|на|в|у)\s*$/i, ''))) };
+}
+// розбиває надиктоване на частини за ключовими словами
+function vlSplit(text) {
+  const s = String(text || '').replace(/[’ʼ`]/g, "'");
+  const parts = []; let m, last = null; VL_TRIG.lastIndex = 0;
+  while ((m = VL_TRIG.exec(s))) {
+    const v = (m[2] || m[3] || m[4] || '').toLowerCase();
+    const l = /купити|придбати/.test(v) ? 'buy' : /зробити/.test(v) ? 'todo' : 'plan';
+    if (last) last.end = m.index;
+    last = { l, start: m.index + m[0].length }; parts.push(last);
+  }
+  if (last) last.end = s.length;
+  return parts.map(p => ({ l: p.l, s: vlClean(s.slice(p.start, p.end)) })).filter(p => p.s);
+}
+const vlHasTrig = text => { VL_TRIG.lastIndex = 0; return VL_TRIG.test(String(text || '').replace(/[’ʼ`]/g, "'")); };
+const vlFirst = text => { VL_TRIG.lastIndex = 0; const m = VL_TRIG.exec(String(text || '').replace(/[’ʼ`]/g, "'")); return m ? m.index : -1; };
+function voiceLists(text, defL, pre) {
+  let parts = vlSplit(text);
+  if (!parts.length && defL) parts = [{ l: defL, s: vlClean(text) }];
+  const patch = {}, said = { buy: [], todo: [], plan: [] }, ask = [];
+  const maxOf = l => listItems(l).reduce((m, z) => Math.max(m, z.order || 0), 0);
+  const ord = { buy: maxOf('buy'), todo: maxOf('todo'), plan: maxOf('plan') };
+  const at = Date.now();
+  const add = (l, x) => { (patch[l] = patch[l] || {})['g' + newId()] = { who: me, at, done: false, order: ++ord[l], voice: true, ...x }; said[l].push(x.text); };
+  for (const p of parts) {
+    if (p.l === 'buy') {
+      const have = new Set(listItems('buy').filter(z => !z.done).map(z => z.text.toLowerCase()));
+      for (const it of vlSplitBuy(p.s)) if (!have.has(it.text.toLowerCase())) { add('buy', { text: it.text }); have.add(it.text.toLowerCase()); }
+    } else if (p.l === 'todo') add('todo', { text: vlCap(p.s) });
+    else {
+      const w = vlWhen(p.s);
+      if (!w.text) continue;
+      if (w.when) { add('plan', { text: w.text, when: w.when, leads: [30], notify: me }); said.plan[said.plan.length - 1] += ' (' + whenStr(w.when) + (w.hasTime ? '' : ' — час не названо') + ')'; }
+      else ask.push(w.text);
+    }
+  }
+  if (Object.keys(patch).length) { saveLists(patch); if (said.plan.length) askNotify(); }
+  const msg = (pre ? [pre] : []).concat([['buy', 'Купити'], ['todo', 'Зробити'], ['plan', 'Заплановано']].filter(([l]) => said[l].length).map(([l, n]) => n + ': ' + said[l].join(', '))).join(' · ');
+  if (msg) toast('🎤 ' + msg);
+  if (ask.length) openItem('plan', null, { text: ask[0] });
+  else if (!msg) toast('🎤 Нічого не додано: «' + (text || '…') + '»');
+}
 function voiceFinish(text) {
   voiceUI('close');
+  const mode = vMode; vMode = 'exp';
+  const fi = vlFirst(text);
+  if (fi >= 0 || mode === 'lists') {
+    const pre = fi > 0 ? String(text).slice(0, fi).trim() : '';
+    const rp = pre && parseVoice(pre);
+    let em = '';
+    if (rp) { const cat = rp.note ? voiceCat(rp.note) : 'other', now = new Date(); setDoc(doc(db, 'families', fid, 'months', now.getFullYear() + '-' + pad(now.getMonth() + 1)), { exp: { ['v' + newId()]: { who: me, cat, amount: String(rp.amount), note: rp.note || 'Голосовий запис', at: Date.now(), voice: true, ...(cat === 'other' ? { ask: true } : {}) } } }, { merge: true }); em = 'Витрата ' + fmt(rp.amount) + (rp.note ? ' · ' + rp.note : '') + ' → ' + CAT[cat].name; }
+    voiceLists(fi > 0 ? String(text).slice(fi) : text, mode === 'lists' ? 'buy' : '', em);
+    return;
+  }
   const r = parseVoice(text);
   if (!r) { toast('🎤 Не зрозумів суму: «' + (text || '…') + '». Спробуй ще: спершу суму, потім на що.'); return; }
   const now = new Date(), m = now.getFullYear() + '-' + pad(now.getMonth() + 1);
@@ -894,9 +1057,10 @@ function voiceFinish(text) {
   setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['v' + newId()]: ve } }, { merge: true });
   toast('🎤 Записано: ' + fmt(r.amount) + (r.note ? ' · ' + r.note : '') + ' → ' + CAT[cat].name);
 }
-function voiceStart() {
+function voiceStart(mode) {
   if (!voiceSupported()) { toast('Голосовий запис недоступний на цьому телефоні'); return; }
-  vText = ''; voiceUI('listen', '');
+  vText = ''; vMode = mode === 'lists' ? 'lists' : 'exp'; voiceUI('listen', '');
+  document.querySelector('#vov .vhint').innerHTML = vMode === 'lists' ? 'Скажи: «<b>потрібно купити</b> два літри молока, хліб і 10 яєць», «<b>потрібно зробити</b> полагодити кран», «<b>заплановано</b> завтра о 10:30 лікар»' : 'Скажи суму, потім на що. Напр.: «250 гривень хліб і молоко». Або «потрібно купити…», «потрібно зробити…», «заплановано…»';
   if (navigator.vibrate) navigator.vibrate(40);
   if (NATIVE) { window.Android.startVoice(); return; }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -921,11 +1085,11 @@ window.__voice = (ev, text) => {
 // довге натискання на вкладку «Витрачено»
 (() => {
   let t = null, fired = false;
-  const start = e => { const b = e.target.closest('[data-tab=exp]'); if (!b || !voiceOn()) return; fired = false; t = setTimeout(() => { fired = true; voiceStart(); }, 550); };
+  const start = e => { const b = e.target.closest('[data-tab=exp],[data-tab=lists]'); if (!b || !voiceOn()) return; fired = false; t = setTimeout(() => { fired = true; voiceStart(b.dataset.tab); }, 550); };
   const end = () => clearTimeout(t);
   $app.addEventListener('touchstart', start, { passive: true }); $app.addEventListener('mousedown', start);
   ['touchend', 'touchmove', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => $app.addEventListener(ev, end, { passive: true }));
-  $app.addEventListener('click', e => { if (fired && e.target.closest('[data-tab=exp]')) { fired = false; e.stopPropagation(); e.preventDefault(); } }, true);
+  $app.addEventListener('click', e => { if (fired && e.target.closest('[data-tab=exp],[data-tab=lists]')) { fired = false; e.stopPropagation(); e.preventDefault(); } }, true);
   $app.addEventListener('contextmenu', e => { if (e.target.closest('[data-tab]')) e.preventDefault(); });
 })();
 function renderAutoNative() {
@@ -1275,7 +1439,7 @@ function renderLists() {
       return '<div class="li ' + (x.done ? 'done' : x.who === 'd' ? 'byd' : 'bys') + (over ? ' over' : soon ? ' soon' : '') + (isOpen ? ' drag' : '') + '" data-l="' + l + '" data-id="' + esc(x.id) + '">' +
         '<span class="ln num">' + n + '</span>' +
         '<button class="ck" data-lact="tick" data-l="' + l + '" data-id="' + esc(x.id) + '" aria-label="Відмітити">' + (x.done ? '✓' : '') + '</button>' +
-        '<button class="lt" data-lact="edit" data-l="' + l + '" data-id="' + esc(x.id) + '"><b>' + esc(x.text) + '</b><small>' + whoDot(x.who) + ' ' + WHO_N(x.who) +
+        '<button class="lt" data-lact="edit" data-l="' + l + '" data-id="' + esc(x.id) + '"><b>' + esc(x.text) + '</b><small>' + whoDot(x.who) + ' ' + WHO_N(x.who) + (x.voice ? ' · 🎤' : '') +
           (l === 'plan' && x.when ? ' · <span class="wh">' + whenStr(x.when) + (over ? ' · протерміновано' : '') + '</span> · 🔔 ' + leadsOf(x).sort((a, b) => b - a).map(leadStr).join(', ') + ' · ' + NOTIFY_N[notifyOf(x)] : '') + '</small></button>' +
         (x.done ? '<span class="stamp">' + (x.billed ? 'СПИСАНО' : stamp) + '</span>' : '') +
         '<span class="la">' +
@@ -1295,12 +1459,12 @@ function renderLists() {
   return '<div class="list"><div class="wholeg"><span>' + whoDot('s') + ' Сергій</span><span>' + whoDot('d') + ' Даша</span></div>' + LISTS.map(sec).join('') + perm + '</div>';
 }
 function toLocalInputs(t) { const d = new Date(t); return [d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()), pad(d.getHours()) + ':' + pad(d.getMinutes())]; }
-function openItem(l, id) {
+function openItem(l, id, pre) {
   const x = id ? (st.lists[l] || {})[id] : null;
   const title = (x ? 'Змінити — ' : 'Додати — ') + LISTS.find(z => z[0] === l)[1].toLowerCase();
   const [dv, tv] = x && x.when ? toLocalInputs(x.when) : [toLocalInputs(Date.now())[0], ''];
   openSheet(head(title, x ? WHO_N(x.who) + ' · ' + dateStr(x.at) : WHO_N(me) + ' вносить') +
-    '<label class="f">' + (l === 'buy' ? 'Що купити' : 'Що зробити') + '<input class="note" placeholder="' + (l === 'buy' ? 'Напр.: молоко 2 л' : l === 'todo' ? 'Напр.: полагодити кран' : 'Напр.: лікар для Кіри') + '" value="' + (x ? esc(x.text) : '') + '"></label>' +
+    '<label class="f">' + (l === 'buy' ? 'Що купити' : 'Що зробити') + '<input class="note" placeholder="' + (l === 'buy' ? 'Напр.: молоко 2 л' : l === 'todo' ? 'Напр.: полагодити кран' : 'Напр.: лікар для Кіри') + '" value="' + (x ? esc(x.text) : pre ? esc(pre.text) : '') + '"></label>' +
     (l === 'plan' ? '<div class="grid2"><label class="f">Дата<input type="date" data-d value="' + dv + '"></label><label class="f">Час<input type="time" data-t value="' + tv + '"></label></div>' +
       '<div class="f">Сигнали (можна кілька)<div class="chips leadgrid" data-leads>' + LEADS.map(([m, t]) => '<button type="button" class="chip' + ((x ? leadsOf(x) : [30]).includes(m) ? ' on' : '') + '" data-lv="' + m + '" style="--c:#1659C7">' + (m ? 'за ' : '') + t + '</button>').join('') + '</div></div>' +
       '<div class="f">Кому сигналізувати<div class="sign three" data-ntf>' + [['s', 'Сергію'], ['d', 'Даші'], ['both', 'Обом']].map(([k, t]) => '<button type="button" data-nv="' + k + '" class="' + ((x ? notifyOf(x) : me) === k ? 'on ' + k : '') + '">' + t + '</button>').join('') + '</div></div>' : '') +
@@ -1515,7 +1679,8 @@ $app.addEventListener('click', e => {
   else if (t.dataset.act === 'rpay') openRecPay(t.dataset.rid);
   else if (t.dataset.act === 'theme') { ls.set('theme', themeNow() === 'dark' ? 'light' : 'dark'); applyTheme(); render(); }
   else if (t.dataset.act === 'vtoggle') { ls.set('voice', voiceOn() ? '0' : '1'); render(); }
-  else if (t.dataset.act === 'vtry') voiceStart();
+  else if (t.dataset.act === 'vtry') voiceStart('exp');
+  else if (t.dataset.act === 'vtryl') voiceStart('lists');
   else if (t.dataset.act === 'n_notif') window.Android.openNotifAccess();
   else if (t.dataset.act === 'n_bat') window.Android.openBattery();
   else if (t.dataset.act === 'n_auto') window.Android.openAutostart();
