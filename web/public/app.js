@@ -216,11 +216,12 @@ function render() {
   const mi = parseInt(st.month.slice(5), 10) - 1, yr = st.month.slice(0, 4), mword = NAMES[mi];
   const sync = '<div class="sync"><span class="dot' + (st.pending ? ' wait' : '') + '"></span>' + (st.pending ? 'Очікує інтернету — збережено на телефоні' : 'Синхронізовано') + '</div>';
 
+  if (st.screen === 'rec') { $app.innerHTML = renderRec(mword); return; }
   if (st.screen === 'auto') { $app.innerHTML = NATIVE ? renderAutoNative() : renderAuto(); return; }
   if (st.screen === 'stash') { $app.innerHTML = renderStash(); updStashForm(); return; }
   if (st.screen === 'expdetails') {
     const rows = expList().map(x => '<button class="erow ' + (x.who === 'd' ? 'byd' : 'bys') + '" data-exp="' + esc(x.id) + '"><span class="cdot" style="background:' + CAT[x.cat].color + '"></span>' +
-      '<span class="et"><b>' + (esc(x.note) || esc(CAT[x.cat].name)) + '</b><small>' + esc(CAT[x.cat].name) + ' · ' + dateStr(x.at) + ' · ' + (x.who === 'd' ? 'Даша' : 'Сергій') + (x.auto ? ' · ⚡ авто' : x.voice ? ' · 🎤 голос' : '') + '</small></span>' +
+      '<span class="et"><b>' + (esc(x.note) || esc(CAT[x.cat].name)) + '</b><small>' + esc(CAT[x.cat].name) + ' · ' + dateStr(x.at) + ' · ' + (x.who === 'd' ? 'Даша' : 'Сергій') + (x.ask ? ' · ❓ уточнити' : '') + (x.auto ? ' · ⚡ авто' : x.voice ? ' · 🎤 голос' : '') + '</small></span>' +
       '<span class="ev num">' + fmt(num(x.amount)) + '</span></button>').join('');
     $app.innerHTML =
       '<div class="top" style="justify-content:flex-start;gap:4px"><button class="back" data-act="back" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>' +
@@ -361,12 +362,13 @@ function renderExp(mword) {
     (legend || '<div class="muted small" style="text-align:center">Витрат ще немає</div>') + '</section>' +
     '<section class="card pair"><div class="pl"><h2>Записи</h2><div class="num" style="font-size:22px;font-weight:700">' + fmt(total) + '</div><div class="small muted">' + nword + '</div></div>' +
     '<div class="pb"><button class="btn" data-act="expdetails">Подробиці</button></div></section>' +
+    '<button class="card autobtn recbtn" data-act="recs"><span class="si">📅</span><span class="sc"><b>Постійні платежі</b><small>' + (recList().length ? 'ще оплатити ' + fmt(recLeft()) + ' з ' + recList().length + ' платежів' : 'оренда, комуналка, зв\'язок, підписки…') + '</small></span><span class="chev">›</span></button>' +
     '<button class="card autobtn" data-act="autoset"><span class="si">⚙️</span><span class="sc"><b>Налаштування автозапису витрат</b><small>' + (NATIVE ? (window.Android.notifAccess() ? 'увімкнено на цьому телефоні' : 'потрібно увімкнути на цьому телефоні') : 'оплата Приватом сама потрапляє у витрати') + '</small></span><span class="chev">›</span></button>' +
     '<section class="card num"><div class="tot s"><span>Витратив Сергій</span><b>' + fmt(ts) + '</b></div>' +
     '<div class="tot d"><span>Витратила Даша</span><b>' + fmt(td) + '</b></div>' +
     carryBtn() +
     '<div class="famrow"><div><div class="muted" style="font-size:13px">Витрачено сім\'єю за ' + mword + '</div><div class="family">' + fmt(total) + '</div></div>' + stashBtn() + '</div>' +
-    '<div class="ctr" style="padding:2px 4px 0"><div class="muted small">Залишок (прибуток + залишок − витрати)</div><div class="num" style="font-size:20px;font-weight:700;color:' + (inc - total < 0 ? '#B3261E' : '#1E7A44') + '">' + fmt(inc - total) + '</div></div></section>' +
+    '<div class="ctr" style="padding:2px 4px 0"><div class="muted small">Залишок (прибуток + залишок − витрати)</div><div class="num" style="font-size:20px;font-weight:700;color:' + (inc - total < 0 ? '#B3261E' : '#1E7A44') + '">' + fmt(inc - total) + '</div>' + (recLeft() > 0 ? '<div class="small muted" style="margin-top:6px">Ще постійні платежі: −' + fmt(recLeft()) + ' → вільно <b style="color:' + (inc - total - recLeft() < 0 ? '#B3261E' : '#1E7A44') + '">' + fmt(inc - total - recLeft()) + '</b></div>' : '') + '</div></section>' +
     '</div>';
 }
 
@@ -447,7 +449,7 @@ function openExp(catId, id) {
     if (num(ia.value) <= 0) { ia.focus(); return false; }
     if (!cat) { ov.querySelector('.chips').classList.add('need'); return false; }
     const amount = String(Math.round(num(ia.value) * 100) / 100);
-    if (ex) save({ exp: { [id]: { amount, note: inote.value.trim(), cat } } });
+    if (ex) { save({ exp: { [id]: { amount, note: inote.value.trim(), cat, ask: deleteField() } } }); const k = ex.mkey; if (k && cat !== 'other' && cat !== ex.cat) saveLists({ rules: { [k]: cat } }); }
     else {
       const nid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
       save({ exp: { [nid]: { who: me, cat, amount, note: inote.value.trim(), at: Date.now() } } });
@@ -757,22 +759,32 @@ function handleInbox(id, x) { inboxChain = inboxChain.then(() => handleInbox1(id
 async function handleInbox1(id, x) {
   if (handledInbox.has(id)) return; handledInbox.add(id);
   let at = num(x.at); at = at > 1e12 ? at : at > 1e9 ? at * 1000 : Date.now();
-  const who = x.who === 'd' ? 'd' : 's', r = parseBankPush(x.text);
+  const who = x.who === 'd' ? 'd' : 's';
+  const tr = parseTransfer(String(x.text || '').replace(/\s+/g, ' ').trim(), who);
+  const r = tr ? null : parseBankPush(x.text);
+  if (r && !r.test) { const k = mkey(r.note), rc = shopRules()[k]; r.mkey = k; if (rc && CAT[rc]) { r.cat = rc; r.catSure = true; } }
   try {
-    if (r && r.test) { if (who === me) toast('✅ Автозапис працює: запис дійшов до застосунку'); }
+    if (tr && tr.transfer) {
+      const d = new Date(at), m = d.getFullYear() + '-' + pad(d.getMonth() + 1);
+      if (tr.incoming) await setDoc(doc(db, 'families', fid, 'months', m), { pin: { ['t' + id]: { who, amount: String(tr.amount), note: tr.note, at } } }, { merge: true });
+      else await setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['t' + id]: { who, cat: 'other', amount: String(tr.amount), note: tr.note, at, auto: true, src: 'privat', ask: true } } }, { merge: true });
+    }
+    else if (r && r.test) { if (who === me) toast('✅ Автозапис працює: запис дійшов до застосунку'); }
     else if (r) {
       const d = new Date(at), m = d.getFullYear() + '-' + pad(d.getMonth() + 1);
       const pool = recentAuto.concat(Object.entries((mdata(m).exp) || {}).map(([eid, e]) => ({ m, id: eid, ...e })));
       const twin = pool.find(e => e.auto && e.who === who && e.src && e.src !== r.src && Math.abs(num(e.amount) - r.amount) < 0.01 && Math.abs((e.at || 0) - at) < 10 * 60000);
       if (twin) {
         const patch = {};
-        if (r.src === 'wallet') { patch.note = r.note; if (!twin.catSure && r.catSure) patch.cat = r.cat; }
-        if (r.src === 'privat' && r.catSure) patch.cat = r.cat;
+        if (r.src === 'wallet') { patch.note = r.note; patch.mkey = r.mkey; if (!twin.catSure && r.catSure) patch.cat = r.cat; }
+        if (r.src === 'privat' && r.catSure && !(twin.src === 'wallet' && shopRules()[twin.mkey])) patch.cat = r.cat;
         patch.src = 'both'; patch.catSure = !!(twin.catSure || r.catSure);
+        if (patch.catSure) patch.ask = deleteField();
         Object.assign(twin, patch);
         await setDoc(doc(db, 'families', fid, 'months', twin.m), { exp: { [twin.id]: patch } }, { merge: true });
       } else {
-        const e = { who, cat: r.cat, amount: String(r.amount), note: r.note, at, auto: true, src: r.src, catSure: r.catSure };
+        const e = { who, cat: r.cat, amount: String(r.amount), note: r.note, at, auto: true, src: r.src, catSure: r.catSure, mkey: r.mkey };
+        if (!r.catSure) e.ask = true;
         recentAuto.push({ m, id: 'a' + id, ...e }); if (recentAuto.length > 50) recentAuto.shift();
         await setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['a' + id]: e } }, { merge: true });
         if (who === me) toast('⚡ Записано: ' + fmt(r.amount) + ' · ' + r.note + ' → ' + CAT[r.cat].name);
@@ -874,7 +886,9 @@ function voiceFinish(text) {
   if (!r) { toast('🎤 Не зрозумів суму: «' + (text || '…') + '». Спробуй ще: спершу суму, потім на що.'); return; }
   const now = new Date(), m = now.getFullYear() + '-' + pad(now.getMonth() + 1);
   const cat = r.note ? voiceCat(r.note) : 'other';
-  setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['v' + newId()]: { who: me, cat, amount: String(r.amount), note: r.note || 'Голосовий запис', at: Date.now(), voice: true } } }, { merge: true });
+  const ve = { who: me, cat, amount: String(r.amount), note: r.note || 'Голосовий запис', at: Date.now(), voice: true };
+  if (cat === 'other') ve.ask = true;
+  setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['v' + newId()]: ve } }, { merge: true });
   toast('🎤 Записано: ' + fmt(r.amount) + (r.note ? ' · ' + r.note : '') + ' → ' + CAT[cat].name);
 }
 function voiceStart() {
@@ -923,7 +937,7 @@ function renderAutoNative() {
       row(bat, 'Без обмежень батареї', bat ? 'Система не «приспить» автозапис' : 'Інакше система може вимикати автозапис', 'n_bat', bat ? 'Відкрити' : 'Дозволити') +
       (xi ? row(false, 'Автозапуск (Xiaomi/Redmi)', 'Увімкни перемикач навпроти «Сімейна бухгалтерія»', 'n_auto', 'Відкрити') : '') +
     '</section>' +
-    voiceSection() +
+    voiceSection() + cardsSection() +
     '<section class="card"><h2>Нагадування «Заплановано»</h2><div class="small muted">Приходять як системні сповіщення зі звуком, навіть коли застосунок закритий.</div><button class="btn ghost" data-act="n_test">Перевірити (сигнал за 10 с)</button></section>' +
     '<section class="card"><h2>Останні сповіщення банку</h2>' + (last.length ? last.slice(0, 8).map(x => { const r = parseBankPush(x.text); return '<div class="srow ' + (r && r.amount ? 'bys' : '') + '"><span class="et"><b>' + (r && r.amount ? fmt(r.amount) + ' → ' + esc(CAT[r.cat].name) : 'не витрата') + '</b><small>' + esc(x.text) + ' · ' + stDate(x.at) + '</small></span></div>'; }).join('') : '<div class="small muted">Ще не було. Зроби оплату — тут з\'явиться, що прийшло і як розпізналось.</div>') + '</section>' +
     '<button class="btn ghost" data-act="n_upd" style="width:100%">Перевірити оновлення застосунку</button></div>';
@@ -944,7 +958,7 @@ function renderAuto() {
   return '<div class="top" style="justify-content:flex-start;gap:4px"><button class="back" data-act="back" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>' +
     '<div><h1 style="font-size:20px">⚙️ Автозапис витрат</h1><div class="small muted">Налаштування для телефону: <b>' + name + '</b></div></div></div>' +
     '<div class="list"><section class="card"><div class="small">Після оплати карткою Приват (NFC, термінал, онлайн) Приват24 надсилає сповіщення. Програма <b>MacroDroid</b> перехоплює його і передає сюди: застосунок сам бере суму й магазин, ставить статтю і записує витрату від <b>' + name + '</b>. Зарахування, перекази й коди підтвердження ігноруються. Записи з автозапису позначені «⚡ авто» — їх можна змінити чи видалити як звичайні.</div></section>' +
-    voiceSection() +
+    voiceSection() + cardsSection() +
     step(1, 'Встановити MacroDroid', '<div class="small">Google Play → <b>MacroDroid</b> (безкоштовно). При першому запуску дозволь <b>доступ до сповіщень</b>.</div><a class="btn big" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid" target="_blank" rel="noopener">Відкрити в Google Play</a>') +
     step(2, 'Тригер', '<div class="small">«Додати макрос» → <b>Тригери +</b> → <b>Пристрій / Сповіщення</b> → <b>Сповіщення</b> → «Сповіщення з\'явилось» → вибрати програму <b>Приват24</b> → текст: <b>будь-який</b> → OK.</div>') +
     step(3, 'Дія — HTTP-запит', '<div class="small"><b>Дії +</b> → <b>Веб-інтеграція</b> → <b>HTTP-запит</b>. Метод: <b>POST</b>.</div><div class="small muted">URL:</div>' + box('aurl', INBOX_URL) +
@@ -953,6 +967,202 @@ function renderAuto() {
     step(4, 'Зберегти й не давати системі вимикати', '<div class="small">Назва макросу: «Витрати Приват» → зберегти ✓. Налаштування Android → Програми → MacroDroid → Батарея → <b>Без обмежень</b>. На Pixel/Samsung також вимкни «Призупиняти, якщо не використовується».</div>') +
     step(5, 'Перевірка', '<div class="small">Кнопка нижче перевіряє, що сервер приймає записи. Потім зроби будь-яку оплату — за кілька секунд з\'явиться запис у «Витрачено» (якщо застосунок закритий — щойно відкриєш на будь-якому з телефонів).</div><button class="btn big" data-act="autotest">Перевірити зв\'язок</button>') +
     '<section class="card"><div class="small muted">' + (w === 's' ? 'Даші' : 'Сергію') + ' — те саме на своєму телефоні: відкрий цей екран у застосунку на <b>її/його</b> телефоні, бо текст тіла запиту там інший (позначка, хто платив).</div></section></div>';
+}
+
+// ---------- словник магазинів, «хвости», картки сім'ї, списання чеком, постійні платежі ----------
+const mkey = s => String(s || '').toUpperCase().replace(/[^A-ZА-ЯІЇЄҐ0-9]+/g, ' ').trim().slice(0, 30);
+const shopRules = () => st.lists.rules || {};
+const famCards = () => Object.entries(st.lists.cards || {}).map(([id, c]) => ({ id, ...c })).filter(c => c && c.last4);
+const cardOwner = c => (c.owner === 's' ? 'Сергій' : c.owner === 'd' ? 'Даша' : (c.ownerName || 'Інше'));
+const catChips = (sel, attr) => '<div class="chips"' + (attr || '') + '>' + CATS.map(([cid, name, color]) => '<button type="button" class="chip' + (cid === sel ? ' on' : '') + '" data-c="' + cid + '" style="--c:' + color + '">' + name + '</button>').join('') + '</div>';
+function wireChips(ov, onPick) {
+  ov.querySelectorAll('.chips [data-c]').forEach(b => b.addEventListener('click', () => {
+    b.parentNode.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); b.parentNode.classList.remove('need'); onPick(b.dataset.c);
+  }));
+}
+
+// Переказ у сповіщенні Привату: між своїми картками — ігнор, стороннім — витрата з уточненням, від сторонніх — запитання
+function parseTransfer(raw, who) {
+  const U = raw.toUpperCase();
+  if (!/ПЕРЕКАЗ/.test(U)) return null;
+  let amount = 0, sign = '', m; AMT.lastIndex = 0;
+  while ((m = AMT.exec(raw))) {
+    const before = raw.slice(Math.max(0, m.index - 14), m.index).toUpperCase();
+    if (/БАЛ|ДОСТУП|ЗАЛИШ|ЛІМІТ|КРЕДИТ/.test(before)) continue;
+    sign = m[1]; amount = parseFloat(m[2].replace(/[\s ]/g, '').replace(',', '.')); break;
+  }
+  if (!(amount > 0)) return { ignore: true };
+  const refs = [...raw.matchAll(/(?:\*|•|×|x|X)+\s?(\d{4})\b|\b\d{4}\s?\*{2,}\s?\*{0,4}\s?(\d{4})\b/g)].map(z => z[1] || z[2]);
+  const mine = famCards().filter(c => c.owner === who).map(c => c.last4), fam = famCards().map(c => c.last4);
+  const other = refs.filter(r => !mine.includes(r));
+  if (other.some(r => fam.includes(r))) return { ignore: true, internal: true };
+  const incoming = sign === '+' || /ПЕРЕКАЗ ВІД|ЗАРАХУВАН|НАДХОДЖ|ОТРИМАН/.test(U);
+  const who2 = raw.replace(/(БАЛ\.?|БАЛАНС|ДОСТУПНО|ЗАЛИШОК)[^]*$/i, '').replace(AMT, ' ').replace(/PRIVAT24:?|ПРИВАТ24:?|ПЕРЕКАЗ\w*|НА КАРТКУ|З КАРТКИ|(?<![А-ЯІЇЄҐA-Zа-яіїєґa-z])(?:ВІД|НА)(?![А-ЯІЇЄҐA-Zа-яіїєґa-z])|\*+\s?\d{4}|\d{4}\s?\*+\s?\d{4}|[•×]+\s?\d{4}/gi, ' ').replace(/[.:;,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return { transfer: true, incoming, amount: Math.round(amount * 100) / 100, note: (incoming ? 'Переказ від ' : 'Переказ ') + (who2 || '').slice(0, 30) };
+}
+
+// --- запитання «що за витрата?» для записів, які потрапили в «Різне» ---
+const askedNow = new Set();
+function pendingAsk() {
+  const ms = [st.month, prevMonth(st.month)];
+  for (const m of ms) {
+    const d = mdata(m);
+    for (const [id, e] of Object.entries(d.exp || {})) if (e && e.ask && e.who === me && !askedNow.has(m + id)) return { kind: 'exp', m, id, e };
+    for (const [id, e] of Object.entries(d.pin || {})) if (e && e.who === me && !askedNow.has(m + id)) return { kind: 'pin', m, id, e };
+  }
+  return null;
+}
+function maybeAsk() {
+  if ($sheet.firstChild || st.screen !== 'main' || document.getElementById('vov') || drag.on || typingInApp()) return;
+  const p = pendingAsk(); if (!p) return;
+  askedNow.add(p.m + p.id);
+  const ref = doc(db, 'families', fid, 'months', p.m);
+  if (p.kind === 'pin') {
+    openSheet(head('Вхідний переказ', fmt(num(p.e.amount)) + ' · ' + dateStr(p.e.at)) +
+      '<div class="small">' + esc(p.e.note || '') + '</div><div class="small muted">Як записати ці гроші?</div>' +
+      '<button class="btn big" data-save>У «Бонус+»</button><button type="button" class="btn big ghost" data-ign>Не записувати (свої / не дохід)</button>', () => {
+      setDoc(ref, { bonus: { ['p' + p.id]: { who: me, amount: String(p.e.amount), note: p.e.note || 'Вхідний переказ', at: p.e.at } }, pin: { [p.id]: deleteField() } }, { merge: true });
+    });
+    $sheet.querySelector('[data-ign]').addEventListener('click', () => { setDoc(ref, { pin: { [p.id]: deleteField() } }, { merge: true }); $sheet.innerHTML = ''; });
+    return;
+  }
+  let cat = '';
+  openSheet(head('Що це за витрата?', fmt(num(p.e.amount)) + ' · ' + dateStr(p.e.at)) +
+    '<div style="font-size:16px;font-weight:600">' + esc(p.e.note || 'Без опису') + '</div>' +
+    '<div class="small muted">Автозапис не впізнав статтю. Вибери — і наступного разу ' + (p.e.mkey ? 'цей магазин' : 'такий запис') + ' піде туди сам.</div>' +
+    catChips('', '') +
+    '<label class="f">Уточнити опис (необов\'язково)<input class="note" value="' + esc(p.e.note || '') + '"></label>' +
+    '<button class="btn big" data-save>Зберегти</button><button type="button" class="btn ghost" data-keep>Залишити в «Різне»</button>', ov => {
+    if (!cat) { ov.querySelector('.chips').classList.add('need'); return false; }
+    const note = ov.querySelector('input.note').value.trim();
+    setDoc(ref, { exp: { [p.id]: { cat, note: note || p.e.note || '', ask: deleteField() } } }, { merge: true });
+    const k = p.e.mkey || mkey(p.e.note);
+    if (k && cat !== 'other') saveLists({ rules: { [k]: cat } });
+    toast('Записано в «' + CAT[cat].name + '»' + (k && cat !== 'other' ? ' — запам\'ятав для «' + (p.e.note || k) + '»' : ''));
+  });
+  const ov = $sheet.firstChild;
+  wireChips(ov, c => { cat = c; });
+  ov.querySelector('[data-keep]').addEventListener('click', () => { setDoc(ref, { exp: { [p.id]: { ask: deleteField() } } }, { merge: true }); $sheet.innerHTML = ''; });
+}
+
+// --- картки сім'ї (у налаштуваннях автозапису) ---
+function cardsSection() {
+  const rows = famCards().map(c => '<div class="srow ' + (c.owner === 'd' ? 'byd' : c.owner === 's' ? 'bys' : '') + '"><span class="et"><b class="num">•• ' + esc(c.last4) + ' — ' + esc(cardOwner(c)) + '</b><small>' + esc(c.note || 'картка') + '</small></span>' +
+    '<button type="button" class="ibtn del" data-act="cdel" data-cid="' + esc(c.id) + '" aria-label="Видалити">✕</button></div>').join('');
+  return '<section class="card"><div class="vhead"><span class="si">💳</span><span class="sc"><b>Картки нашої сім\'ї</b><small>Перекази між цими картками не записуються ні у витрати, ні в доходи. Переказ стороннім — витрата з уточненням, від сторонніх — запитання.</small></span></div>' +
+    (rows ? '<div class="shist">' + rows + '</div>' : '<div class="small muted">Ще немає карток.</div>') +
+    '<button class="btn ghost" data-act="cadd" style="width:100%">+ Додати картку</button></section>';
+}
+function openCardAdd() {
+  let owner = me;
+  openSheet(head('Нова картка', 'Останні 4 цифри та чия вона') +
+    '<label class="f">Останні 4 цифри<input inputmode="numeric" maxlength="4" placeholder="1234"></label>' +
+    '<div class="f">Кому належить<div class="sign three" data-own>' + [['s', 'Сергій'], ['d', 'Даша'], ['x', 'Інше']].map(([k, t]) => '<button type="button" data-ow="' + k + '" class="' + (k === owner ? 'on ' + (k === 'x' ? 'both' : k) : '') + '">' + t + '</button>').join('') + '</div></div>' +
+    '<label class="f" data-oname style="display:none">Чия (ім\'я)<input class="oname" placeholder="Напр.: мама, Кіра"></label>' +
+    '<label class="f">Примітка<input class="note" placeholder="Напр.: Приват Універсальна, кредитка"></label>' +
+    '<button class="btn big" data-save>Додати</button>', ov => {
+    const l4 = ov.querySelector('input[inputmode]');
+    if (!/^\d{4}$/.test(l4.value.trim())) { l4.classList.add('need'); l4.focus(); return false; }
+    const c = { last4: l4.value.trim(), owner: owner === 'x' ? 'x' : owner, ownerName: owner === 'x' ? ov.querySelector('input.oname').value.trim() : '', note: ov.querySelector('input.note').value.trim(), at: Date.now() };
+    saveLists({ cards: { ['c' + newId()]: c } });
+    setTimeout(render, 300);
+  });
+  const ov = $sheet.firstChild;
+  ov.querySelectorAll('[data-ow]').forEach(b => b.addEventListener('click', () => {
+    owner = b.dataset.ow; ov.querySelectorAll('[data-ow]').forEach(z => z.className = z === b ? 'on ' + (owner === 'x' ? 'both' : owner) : '');
+    ov.querySelector('[data-oname]').style.display = owner === 'x' ? '' : 'none';
+  }));
+}
+
+// --- «Списати куплене» одним чеком ---
+function billable() { return listItems('buy').filter(x => x.done && !x.billed).sort((a, b) => (a.doneAt || 0) - (b.doneAt || 0)); }
+function openBill() {
+  const items = billable(); if (!items.length) return;
+  const nowT = Date.now();
+  const recent = Object.entries(st.data.exp || {}).map(([id, e]) => ({ id, ...e })).filter(e => e.who === me && e.auto && nowT - (e.at || 0) < 3 * 3600000).sort((a, b) => b.at - a.at).slice(0, 3);
+  let cat = 'food', link = recent.length && nowT - recent[0].at < 3600000 && ['food', 'home', 'other'].includes(recent[0].cat) ? recent[0].id : '';
+  const opts = recent.map(e => '<button type="button" class="chip' + (e.id === link ? ' on' : '') + '" data-lk="' + esc(e.id) + '" style="--c:#1659C7">' + esc(fmt(num(e.amount))) + ' · ' + esc((e.note || '').slice(0, 18)) + '</button>').join('') +
+    '<button type="button" class="chip' + (!link ? ' on' : '') + '" data-lk="" style="--c:#1659C7">Нова витрата</button>';
+  openSheet(head('Списати куплене', items.length + ' поз. · ' + WHO_N(me)) +
+    '<div class="billl">' + items.map(x => '<label class="billi"><input type="checkbox" checked data-bi="' + esc(x.id) + '"> ' + esc(x.text) + '</label>').join('') + '</div>' +
+    '<div class="f">Це оплата, яку вже записав автозапис?<div class="chips" data-links>' + opts + '</div></div>' +
+    '<div data-newpart' + (link ? ' style="display:none"' : '') + '><label class="f">Сума чека, ₴<input inputmode="decimal" placeholder="0,00"></label><div class="f" style="margin-top:8px">Стаття' + catChips(cat, ' data-cc') + '</div></div>' +
+    '<button class="btn big" data-save>Списати</button>', ov => {
+    const ids = [...ov.querySelectorAll('[data-bi]:checked')].map(b => b.dataset.bi);
+    if (!ids.length) return false;
+    const names = ids.map(id => st.lists.buy[id].text).join(', ');
+    const m = st.month;
+    if (link) {
+      const e = st.data.exp[link];
+      save({ exp: { [link]: { note: (e.note ? e.note + ': ' : '') + names } } });
+    } else {
+      const ia = ov.querySelector('input[inputmode]');
+      if (num(ia.value) <= 0) { ia.classList.add('need'); ia.focus(); return false; }
+      save({ exp: { ['b' + newId()]: { who: me, cat, amount: String(Math.round(num(ia.value) * 100) / 100), note: names, at: Date.now() } } });
+    }
+    const patch = {}; ids.forEach(id => { patch[id] = { billed: true }; }); saveLists({ buy: patch });
+    toast('🧾 Списано: ' + names.slice(0, 60));
+  });
+  const ov = $sheet.firstChild;
+  ov.querySelectorAll('[data-lk]').forEach(b => b.addEventListener('click', () => {
+    link = b.dataset.lk; ov.querySelectorAll('[data-lk]').forEach(z => z.classList.toggle('on', z === b));
+    ov.querySelector('[data-newpart]').style.display = link ? 'none' : '';
+  }));
+  ov.querySelectorAll('[data-cc] [data-c]').forEach(b => b.addEventListener('click', () => { cat = b.dataset.c; b.parentNode.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); }));
+}
+
+// --- постійні платежі ---
+const recList = () => Object.entries(st.lists.rec || {}).map(([id, r]) => ({ id, ...r })).filter(r => r && r.name).sort((a, b) => (a.day || 0) - (b.day || 0) || a.name.localeCompare(b.name));
+function recPaid(r) {
+  const ex = Object.entries(st.data.exp || {}).map(([id, e]) => ({ id, ...e }));
+  const byLink = ex.find(e => e.rec === r.id);
+  if (byLink) return byLink;
+  if (r.match) { const k = r.match.toLowerCase(); return ex.find(e => (e.note || '').toLowerCase().includes(k)) || null; }
+  return null;
+}
+function recLeft() { return recList().filter(r => !recPaid(r)).reduce((t, r) => t + num(r.amount), 0); }
+function renderRec(mword) {
+  const list = recList(), paidSum = list.reduce((t, r) => { const p = recPaid(r); return t + (p ? num(p.amount) : 0); }, 0), left = recLeft();
+  const today = new Date(), cur = st.month === today.getFullYear() + '-' + pad(today.getMonth() + 1);
+  const rows = list.map(r => {
+    const p = recPaid(r), late = !p && cur && r.day && today.getDate() > r.day;
+    return '<div class="rrow ' + (p ? 'ok' : late ? 'late' : '') + '"><button class="rmain" data-act="redit" data-rid="' + esc(r.id) + '"><b>' + esc(r.name) + '</b><small>' + esc(CAT[r.cat] ? CAT[r.cat].name : 'Різне') + (r.day ? ' · до ' + r.day + ' числа' : '') + (r.match ? ' · впізнає «' + esc(r.match) + '»' : '') + '</small></button>' +
+      '<span class="rsum num">' + (p ? '✓ ' + fmt(num(p.amount)) : '≈ ' + fmt(num(r.amount))) + '</span>' +
+      (p ? '' : '<button class="btn" data-act="rpay" data-rid="' + esc(r.id) + '">Оплатити</button>') + '</div>';
+  }).join('');
+  return '<div class="top" style="justify-content:flex-start;gap:4px"><button class="back" data-act="back" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>' +
+    '<div><h1 style="font-size:20px">📅 Постійні платежі</h1><div class="small muted">' + cap(mword) + ' · спільні для обох</div></div></div>' +
+    '<div class="list"><section class="card"><div class="grid2"><div class="mtile" style="background:#E3F5E8;border-color:#8FD3A4;color:#1E7A44"><small>Оплачено</small><b class="num">' + fmt(paidSum) + '</b></div>' +
+    '<div class="mtile" style="background:#FCE6E4;border-color:#F0A39C;color:#B3261E"><small>Ще оплатити</small><b class="num">' + fmt(left) + '</b></div></div>' +
+    '<div class="small muted ctr">Оплачене відмічається само, якщо в «Витрачено» є запис з ключовим словом (напр. автозапис «Київстар»), або кнопкою «Оплатити».</div></section>' +
+    '<section class="card">' + (rows || '<div class="small muted">Ще немає платежів. Додай оренду, комуналку, зв\'язок, підписки…</div>') +
+    '<button class="btn ghost" data-act="radd" style="width:100%">+ Додати постійний платіж</button></section></div>';
+}
+function openRec(id) {
+  const r = id ? st.lists.rec[id] : null; let cat = r ? r.cat : 'utils';
+  openSheet(head(r ? 'Змінити платіж' : 'Новий постійний платіж', 'щомісяця') +
+    '<label class="f">Назва<input class="note" placeholder="Напр.: Інтернет" value="' + (r ? esc(r.name) : '') + '"></label>' +
+    '<div class="grid2"><label class="f">Орієнтовна сума, ₴<input inputmode="decimal" data-ra value="' + (r ? esc(r.amount) : '') + '"></label><label class="f">До якого числа<input inputmode="numeric" data-rd maxlength="2" value="' + (r && r.day ? r.day : '') + '"></label></div>' +
+    '<label class="f">Як упізнати в записах (необов\'язково)<input class="note" data-rm placeholder="Напр.: Київстар, Ланет" value="' + (r && r.match ? esc(r.match) : '') + '"></label>' +
+    '<div class="f">Стаття' + catChips(cat, ' data-cc') + '</div>' +
+    '<button class="btn big" data-save>Зберегти</button>' + (r ? '<button type="button" class="btn ghost del" data-rdel>Видалити платіж</button>' : ''), ov => {
+    const name = ov.querySelector('input.note').value.trim(); if (!name) return false;
+    const rec = { name, amount: String(num(ov.querySelector('[data-ra]').value) || 0), day: Math.min(31, parseInt(ov.querySelector('[data-rd]').value, 10) || 0), match: ov.querySelector('[data-rm]').value.trim(), cat };
+    saveLists({ rec: { [id || 'r' + newId()]: rec } }); setTimeout(render, 300);
+  });
+  const ov = $sheet.firstChild;
+  ov.querySelectorAll('[data-cc] [data-c]').forEach(b => b.addEventListener('click', () => { cat = b.dataset.c; b.parentNode.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); }));
+  const d = ov.querySelector('[data-rdel]'); if (d) d.addEventListener('click', () => { if (confirm('Видалити «' + r.name + '»?')) { saveLists({ rec: { [id]: deleteField() } }); $sheet.innerHTML = ''; setTimeout(render, 300); } });
+}
+function openRecPay(id) {
+  const r = st.lists.rec[id];
+  openSheet(head('Оплатити: ' + r.name, WHO_N(me) + ' · ' + (CAT[r.cat] ? CAT[r.cat].name : 'Різне')) +
+    '<label class="f">Сума, ₴<input inputmode="decimal" value="' + esc(String(r.amount || '').replace('.', ',')) + '"></label>' +
+    '<button class="btn big" data-save>Записати оплату</button>', ov => {
+    const a = num(ov.querySelector('input').value); if (a <= 0) return false;
+    save({ exp: { ['r' + newId()]: { who: me, cat: r.cat || 'other', amount: String(Math.round(a * 100) / 100), note: r.name, at: Date.now(), rec: id } } });
+    setTimeout(render, 300);
+  });
 }
 
 // ---------- купити / зробити / заплановано ----------
@@ -985,7 +1195,7 @@ function renderLists() {
         '<button class="ck" data-lact="tick" data-l="' + l + '" data-id="' + esc(x.id) + '" aria-label="Відмітити">' + (x.done ? '✓' : '') + '</button>' +
         '<button class="lt" data-lact="edit" data-l="' + l + '" data-id="' + esc(x.id) + '"><b>' + esc(x.text) + '</b><small>' + whoDot(x.who) + ' ' + WHO_N(x.who) +
           (l === 'plan' && x.when ? ' · <span class="wh">' + whenStr(x.when) + (over ? ' · протерміновано' : '') + '</span> · 🔔 ' + leadsOf(x).sort((a, b) => b - a).map(leadStr).join(', ') + ' · ' + NOTIFY_N[notifyOf(x)] : '') + '</small></button>' +
-        (x.done ? '<span class="stamp">' + stamp + '</span>' : '') +
+        (x.done ? '<span class="stamp">' + (x.billed ? 'СПИСАНО' : stamp) + '</span>' : '') +
         '<span class="la">' +
           (isOpen ? '<span class="grip" aria-hidden="true">⠿</span>' : '') +
           (isOpen && l === 'plan' && x.when ? '<a class="ibtn" href="' + calLink(x) + '" target="_blank" rel="noopener" aria-label="Додати в Google Календар">📅</a>' : '') +
@@ -994,7 +1204,8 @@ function renderLists() {
     };
     const rows = open.map((x, i) => row(x, true, i, open.length)).join('') + done.map(x => row(x, false)).join('');
     return '<section class="card lcard"><div class="lhead"><h2>' + title + '</h2><span class="muted small">' + open.length + ' відкритих' + (done.length ? ' · ' + done.length + ' готово' : '') + '</span>' +
-      '<button class="addc" data-ladd="' + l + '" aria-label="Додати">+</button></div>' + (open.length > 1 ? '<div class="dhint">Утримуй блок і тягни, щоб змінити порядок</div>' : '') +
+      '<button class="addc" data-ladd="' + l + '" aria-label="Додати">+</button></div>' +
+      (l === 'buy' && billable().length ? '<button class="btn billbtn" data-act="bill">🧾 Списати куплене (' + billable().length + ') одним чеком</button>' : '') + (open.length > 1 ? '<div class="dhint">Утримуй блок і тягни, щоб змінити порядок</div>' : '') +
       (rows || '<div class="muted small ctr" style="padding:8px">Порожньо — натисни «+»</div>') + '</section>';
   };
   const perm = !NATIVE && ('Notification' in window) && Notification.permission !== 'granted' && listItems('plan').some(x => !x.done) ?
@@ -1213,6 +1424,13 @@ $app.addEventListener('click', e => {
   else if (t.dataset.act === 'autoset') { st.screen = 'auto'; render(); window.scrollTo(0, 0); }
   else if (t.dataset.copy) { const v = $app.querySelector('#' + t.dataset.copy).textContent; (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(() => { t.textContent = '✓ Скопійовано'; setTimeout(() => { t.textContent = 'Копіювати'; }, 1500); }).catch(() => { const r = document.createRange(); r.selectNodeContents($app.querySelector('#' + t.dataset.copy)); getSelection().removeAllRanges(); getSelection().addRange(r); }); }
   else if (t.dataset.act === 'autotest') autoTest(t);
+  else if (t.dataset.act === 'cadd') openCardAdd();
+  else if (t.dataset.act === 'cdel') { const c = st.lists.cards[t.dataset.cid]; if (c && confirm('Видалити картку •• ' + c.last4 + '?')) { saveLists({ cards: { [t.dataset.cid]: deleteField() } }); setTimeout(render, 300); } }
+  else if (t.dataset.act === 'bill') openBill();
+  else if (t.dataset.act === 'recs') { st.screen = 'rec'; render(); window.scrollTo(0, 0); }
+  else if (t.dataset.act === 'radd') openRec();
+  else if (t.dataset.act === 'redit') openRec(t.dataset.rid);
+  else if (t.dataset.act === 'rpay') openRecPay(t.dataset.rid);
   else if (t.dataset.act === 'theme') { ls.set('theme', themeNow() === 'dark' ? 'light' : 'dark'); applyTheme(); render(); }
   else if (t.dataset.act === 'vtoggle') { ls.set('voice', voiceOn() ? '0' : '1'); render(); }
   else if (t.dataset.act === 'vtry') voiceStart();
@@ -1235,6 +1453,7 @@ $app.addEventListener('change', e => {
 
 render();
 loadRates();
+setInterval(maybeAsk, 2500);
 subscribeInbox();
 subscribe(); subscribeAll(); subscribeLists();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { subscribe(); subscribeAll(); subscribeLists(); } });
