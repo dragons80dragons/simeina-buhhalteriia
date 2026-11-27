@@ -1,5 +1,5 @@
-const CACHE = 'pributky-v43';
-const SHELL = ['./', 'index.html', 'style.css?v=34', 'app.js?v=34', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
+const CACHE = 'pributky-v44';
+const SHELL = ['./', 'index.html', 'style.css?v=44', 'app.js?v=44', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));

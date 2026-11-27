@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, collection, onSnapshot, setDoc, deleteField, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, collection, onSnapshot, setDoc, deleteField, deleteDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './config.js';
 
 // ---------- storage ----------
@@ -753,8 +753,58 @@ const handledInbox = new Set();
 let unsubInbox = null;
 function subscribeInbox() {
   if (unsubInbox) unsubInbox();
-  unsubInbox = onSnapshot(collection(db, 'families', fid, 'inbox'), qs => qs.docs.forEach(d => handleInbox(d.id, d.data())), () => {});
+  unsubInbox = onSnapshot(collection(db, 'families', fid, 'inbox'), qs => { inboxDocs = qs.docs.map(d => ({ id: d.id, x: d.data() })); scanInbox(); }, () => {});
 }
+// Сповіщення обробляє телефон того, з чийого телефону воно прийшло (інакше два відкриті застосунки
+// обробляють одні й ті самі сповіщення паралельно і пишуть дублі). Якщо власник довго не відкривав застосунок —
+// через 20 хв підхоплює інший телефон. Обробляємо в порядку часу оплати.
+let inboxDocs = [];
+const CLIENT = Math.random().toString(36).slice(2, 10);
+const atMs = v => { const t = num(v); return t > 1e12 ? t : t > 1e9 ? t * 1000 : Date.now(); };
+let scanning = false, rescanT = 0;
+async function scanInbox() {
+  if (scanning) return;
+  const mine = ({ id, x }) => !handledInbox.has(id) && (x.who === me || x.who !== 's' && x.who !== 'd' || Date.now() - atMs(x.at) > 20 * 60000);
+  const todo = inboxDocs.filter(mine);
+  if (!todo.length) return;
+  scanning = true;
+  try {
+    // обробляє один застосунок за раз — інакше Приват і Гаманець однієї оплати можуть потрапити в різні застосунки й не звестись
+    if (await inboxLock()) {
+      todo.sort((a, b) => atMs(a.x.at) - atMs(b.x.at)).forEach(({ id, x }) => handleInbox(id, x));
+      await inboxChain;
+    }
+  } catch (e) {} finally { scanning = false; }
+  // щось лишилось (зайнято іншим застосунком або збій мережі) — ще раз за кілька секунд, один таймер
+  if (!rescanT && inboxDocs.some(mine)) rescanT = setTimeout(() => { rescanT = 0; scanInbox(); }, 5000 + Math.random() * 3000);
+}
+async function inboxLock() {
+  try {
+    return await runTransaction(db, async t => {
+      const s = await t.get(listsRef()), l = (s.exists() && s.data().inLock) || null;
+      if (l && l.by !== CLIENT && Date.now() - num(l.t) < 60000) return false;
+      t.set(listsRef(), { inLock: { by: CLIENT, t: Date.now() } }, { merge: true });
+      return true;
+    });
+  } catch (e) { return false; }
+}
+setInterval(scanInbox, 60000);
+// «застовпити» сповіщення транзакцією — щоб його точно обробив лише один застосунок
+async function claimInbox(id) {
+  try {
+    return await runTransaction(db, async t => {
+      const ref = doc(db, 'families', fid, 'inbox', id), s = await t.get(ref);
+      if (!s.exists()) return false;
+      const c = s.data().claim;
+      if (c && c.by !== CLIENT && Date.now() - num(c.t) < 3 * 60000) return false;
+      t.update(ref, { claim: { by: CLIENT, t: Date.now() } });
+      return true;
+    });
+  } catch (e) { return false; }
+}
+// відбиток тексту сповіщення: те саме сповіщення (повтор із мережі, Гаманець + сервіси Google) не записуємо вдруге
+const pushHash = (who, t) => { let h = 2166136261; const z = who + '|' + String(t || '').replace(/\s+/g, ' ').trim(); for (let i = 0; i < z.length; i++) { h ^= z.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
+const srcHas = (e, s) => e.src === s || e.src === 'both';
 // Одна оплата приходить двічі (Google Гаманець + Приват24) — зводимо в один запис:
 // назва магазину з Гаманця, стаття — з категорії Привату
 const recentAuto = [];
@@ -786,8 +836,28 @@ function classifyPush(text, who, at) {
   if (r && r.amount) return fmt(r.amount) + ' → ' + esc(CAT[r.cat].name);
   return 'не враховано';
 }
+// підписи для «Останні сповіщення банку»: одна оплата = один запис; друге сповіщення про ту саму оплату позначаємо «об'єднано»
+function pushLabels(list) {
+  const out = [], counted = [];
+  list.slice().sort((a, b) => atMs(a.at) - atMs(b.at)).forEach(x => {
+    const at = atMs(x.at); let lab = classifyPush(x.text, me, at);
+    const r = /не враховано|не дохід|переказ|↓/.test(lab) ? null : parseBankPush(deLat(String(x.text || '')));
+    if (r && r.amount) {
+      const ph = pushHash(me, x.text), near = c => Math.abs(c.amount - r.amount) < 0.01 && Math.abs(c.at - at) < 10 * 60000;
+      if (counted.some(c => near(c) && c.ph.includes(ph))) lab = '↳ повтор того ж сповіщення — не враховано';
+      else {
+        const c = counted.find(c => near(c) && !c.src.includes(r.src) && c.src.length === 1);
+        if (c) { c.src.push(r.src); c.ph.push(ph); lab = '↳ та сама оплата — об\'єднано з попереднім'; }
+        else counted.push({ amount: r.amount, at, src: [r.src], ph: [ph] });
+      }
+    }
+    out.push([x, lab]);
+  });
+  return out.reverse();
+}
 async function handleInbox1(id, x) {
   if (handledInbox.has(id)) return; handledInbox.add(id);
+  if (!(await claimInbox(id))) { handledInbox.delete(id); return; }
   let at = num(x.at); at = at > 1e12 ? at : at > 1e9 ? at * 1000 : Date.now();
   const who = x.who === 'd' ? 'd' : 's';
   const norm = translitUa(deLat(String(x.text || ''))).replace(/\s+/g, ' ').trim();
@@ -805,18 +875,26 @@ async function handleInbox1(id, x) {
     else if (r && r.test) { if (who === me) toast('✅ Автозапис працює: запис дійшов до застосунку'); }
     else if (r) {
       const d = new Date(at), m = d.getFullYear() + '-' + pad(d.getMonth() + 1);
-      const pool = recentAuto.concat(Object.entries((mdata(m).exp) || {}).map(([eid, e]) => ({ m, id: eid, ...e })));
-      const twin = pool.find(e => e.auto && e.who === who && e.src && e.src !== r.src && Math.abs(num(e.amount) - r.amount) < 0.01 && Math.abs((e.at || 0) - at) < 10 * 60000);
-      if (twin) {
+      const ph = pushHash(who, x.text);
+      // записи місяця + щойно зроблені цим застосунком (свіжіші за знімок бази)
+      const pm = new Map(Object.entries((mdata(m).exp) || {}).map(([eid, e]) => [m + '|' + eid, { m, id: eid, ...e }]));
+      recentAuto.forEach(e => pm.set(e.m + '|' + e.id, e));
+      const pool = [...pm.values()];
+      const near = e => e.auto && e.who === who && Math.abs(num(e.amount) - r.amount) < 0.01 && Math.abs((e.at || 0) - at) < 10 * 60000;
+      const dup = pool.find(e => near(e) && String(e.ph || '').split(',').includes(ph));
+      // пара шукається лише серед записів, яким ще бракує сповіщення з цього джерела: Приват ↔ Гаманець
+      const twin = dup ? null : pool.filter(e => near(e) && e.src && !srcHas(e, r.src) && e.src !== 'both').sort((a, b) => Math.abs((a.at || 0) - at) - Math.abs((b.at || 0) - at))[0];
+      if (dup) r.dup = true;
+      else if (twin) {
         const patch = {};
         if (r.src === 'wallet') { patch.note = r.note; patch.mkey = r.mkey; if (!twin.catSure && r.catSure) patch.cat = r.cat; }
         if (r.src === 'privat' && r.catSure && !(twin.src === 'wallet' && shopRules()[twin.mkey])) patch.cat = r.cat;
-        patch.src = 'both'; patch.catSure = !!(twin.catSure || r.catSure);
+        patch.src = 'both'; patch.catSure = !!(twin.catSure || r.catSure); patch.ph = (twin.ph ? twin.ph + ',' : '') + ph;
         if (patch.catSure) patch.ask = deleteField();
-        Object.assign(twin, patch);
+        Object.assign(twin, patch); if (!recentAuto.includes(twin)) { recentAuto.push(twin); if (recentAuto.length > 50) recentAuto.shift(); }
         await setDoc(doc(db, 'families', fid, 'months', twin.m), { exp: { [twin.id]: patch } }, { merge: true });
       } else {
-        const e = { who, cat: r.cat, amount: String(r.amount), note: r.note, at, auto: true, src: r.src, catSure: r.catSure, mkey: r.mkey };
+        const e = { who, cat: r.cat, amount: String(r.amount), note: r.note, at, auto: true, src: r.src, catSure: r.catSure, mkey: r.mkey, ph };
         if (!r.catSure) e.ask = true;
         recentAuto.push({ m, id: 'a' + id, ...e }); if (recentAuto.length > 50) recentAuto.shift();
         await setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['a' + id]: e } }, { merge: true });
@@ -825,7 +903,7 @@ async function handleInbox1(id, x) {
     }
     await deleteDoc(doc(db, 'families', fid, 'inbox', id));
     // журнал для діагностики: що прийшло і як розпізналось (останні 40)
-    const res = inc ? (inc.ignore ? 'income-ignore' : 'income ' + (inc.slot || 'ask') + ' ' + inc.month) : tr ? (tr.transfer ? 'transfer' : 'transfer-ignore') : r ? (r.test ? 'test' : 'exp ' + r.cat) : 'ignored';
+    const res = inc ? (inc.ignore ? 'income-ignore' : 'income ' + (inc.slot || 'ask') + ' ' + inc.month) : tr ? (tr.transfer ? 'transfer' : 'transfer-ignore') : r ? (r.test ? 'test' : r.dup ? 'dup' : 'exp ' + r.cat) : 'ignored';
     const bl = st.lists.blog || {}, old = Object.keys(bl).sort((a, b) => (bl[a].at || 0) - (bl[b].at || 0)).slice(0, Math.max(0, Object.keys(bl).length - 39));
     saveLists({ blog: { ['b' + id]: { who, at, text: String(x.text || '').slice(0, 300), res }, ...Object.fromEntries(old.map(k => [k, deleteField()])) } });
   } catch (e) { handledInbox.delete(id); }
@@ -1140,7 +1218,7 @@ function renderAutoNative() {
     '</section>' +
     voiceSection() + cardsSection() +
     '<section class="card"><h2>Нагадування «Заплановано»</h2><div class="small muted">Приходять як системні сповіщення зі звуком, навіть коли застосунок закритий.</div><button class="btn ghost" data-act="n_test">Перевірити (сигнал за 10 с)</button></section>' +
-    '<section class="card"><h2>Останні сповіщення банку</h2>' + (last.length ? last.slice(0, 8).map(x => { const t0 = num(x.at), at = t0 > 1e12 ? t0 : t0 > 1e9 ? t0 * 1000 : Date.now(), lab = classifyPush(x.text, me, at); return '<div class="srow ' + (/не враховано|не дохід/.test(lab) ? '' : 'bys') + '"><span class="et"><b>' + lab + '</b><small>' + esc(x.text) + ' · ' + stDate(x.at) + '</small></span></div>'; }).join('') : '<div class="small muted">Ще не було. Зроби оплату — тут з\'явиться, що прийшло і як розпізналось.</div>') + '</section>' +
+    '<section class="card"><h2>Останні сповіщення банку</h2>' + (last.length ? pushLabels(last.slice(0, 8)).map(([x, lab]) => { return '<div class="srow ' + (/не враховано|не дохід|об'єднано/.test(lab) ? '' : 'bys') + '"><span class="et"><b>' + lab + '</b><small>' + esc(x.text) + ' · ' + stDate(x.at) + '</small></span></div>'; }).join('') : '<div class="small muted">Ще не було. Зроби оплату — тут з\'явиться, що прийшло і як розпізналось.</div>') + '</section>' +
     '<button class="btn ghost" data-act="n_upd" style="width:100%">Перевірити оновлення застосунку</button></div>';
 }
 window.__nativeResume = () => { if (st.screen === 'auto') render(); };

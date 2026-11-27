@@ -13,6 +13,9 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['who', 'at', 'text'])
         && request.resource.data.text is string && request.resource.data.text.size() < 2000;
       allow list, get, delete: if fid.size() >= 24;
+      // застосунок «застовплює» сповіщення, щоб його обробив лише один телефон
+      allow update: if fid.size() >= 24
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claim']);
     }
     match /families/{fid}/lists/{list} {
       allow get, write: if fid.size() >= 24 && list == 'main';
