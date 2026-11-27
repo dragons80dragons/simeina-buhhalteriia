@@ -193,7 +193,7 @@ let unsubLists = null;
 function subscribeLists() {
   if (unsubLists) unsubLists();
   let devSent = false;
-  unsubLists = onSnapshot(listsRef(), snap => { st.lists = snap.data() || {};
+  unsubLists = onSnapshot(listsRef(), snap => { st.lists = snap.data() || {}; if (!snap.metadata.fromCache || snap.exists()) listsReady && listsReady();
     if (NATIVE && !devSent) { devSent = true; try { saveLists({ dev: { [me]: { apk: String(window.Android.version()), at: Date.now(), notif: !!window.Android.notifAccess(), cards: !!window.Android.setCards } } }); } catch (e) {} } try { if (NATIVE && window.Android.setCards) window.Android.setCards(famCards().flatMap(c => [c.last4, c.acct]).filter(Boolean).join(',')); } catch (e) {} checkAlarms(); if (st.tab === 'lists') render(); }, () => {});
 }
 const saveLists = patch => setDoc(listsRef(), patch, { merge: true }).catch(e => alert('Не збережено: ' + e.message));
@@ -757,7 +757,9 @@ function subscribeInbox() {
 // назва магазину з Гаманця, стаття — з категорії Привату
 const recentAuto = [];
 let inboxChain = Promise.resolve();
-function handleInbox(id, x) { inboxChain = inboxChain.then(() => handleInbox1(id, x)).catch(() => {}); }
+// обробляємо вхідні лише після того, як підтягнулись картки сім'ї (інакше рахунок/картку не впізнає)
+var listsReady, listsReadyP = new Promise(r => { listsReady = r; });
+function handleInbox(id, x) { inboxChain = inboxChain.then(() => Promise.race([listsReadyP, new Promise(r => setTimeout(r, 8000))])).then(() => handleInbox1(id, x)).catch(() => {}); }
 // банки інколи пишуть латинськими a/i/o всередині українських слів («зaрaховaно») — повертаємо кирилицю
 const LAT2CYR = { a: 'а', e: 'е', i: 'і', o: 'о', p: 'р', c: 'с', x: 'х', y: 'у', A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', I: 'І', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х' };
 const deLat = t => String(t).replace(/[A-Za-zА-Яа-яІіЇїЄєҐґ']+/g, w => /[А-Яа-яІіЇїЄєҐґ]/.test(w) ? w.replace(/[aeiopcxyABCEHIKMOPTX]/g, ch => LAT2CYR[ch]) : w);
@@ -770,6 +772,18 @@ const translitUa = t => /[А-Яа-яІіЇїЄєҐґ]/.test(t) ? t : String(t).r
   for (let i = 0; i < lw.length;) { const m = TL.find(([a]) => lw.startsWith(a, i)); if (m) { o += m[1]; i += m[0].length; } else { o += lw[i]; i++; } }
   return w[0] === w[0].toUpperCase() ? o[0].toUpperCase() + o.slice(1) : o;
 });
+function classifyPush(text, who, at) {
+  const norm = translitUa(deLat(String(text || ''))).replace(/\s+/g, ' ').trim();
+  const inc = parseIncome(norm, who, at);
+  if (inc && inc.ignore) return '↔ поповнення зі своєї картки — не дохід';
+  if (inc && inc.income) return '<span style="color:#1E7A44">↓ ' + fmt(inc.amount) + ' → ' + (inc.slot ? esc(slotLabel(inc.slot)) + ' за ' + monthWord(inc.month).toLowerCase() : 'зарахування (запитає, куди)') + '</span>';
+  const tr = parseTransfer(norm, who);
+  if (tr && tr.transfer) return '⇄ переказ ' + fmt(tr.amount);
+  if (tr && tr.internal) return '↔ переказ між своїми — не враховано';
+  const r = parseBankPush(deLat(String(text || '')));
+  if (r && r.amount) return fmt(r.amount) + ' → ' + esc(CAT[r.cat].name);
+  return 'не враховано';
+}
 async function handleInbox1(id, x) {
   if (handledInbox.has(id)) return; handledInbox.add(id);
   let at = num(x.at); at = at > 1e12 ? at : at > 1e9 ? at * 1000 : Date.now();
@@ -1124,7 +1138,7 @@ function renderAutoNative() {
     '</section>' +
     voiceSection() + cardsSection() +
     '<section class="card"><h2>Нагадування «Заплановано»</h2><div class="small muted">Приходять як системні сповіщення зі звуком, навіть коли застосунок закритий.</div><button class="btn ghost" data-act="n_test">Перевірити (сигнал за 10 с)</button></section>' +
-    '<section class="card"><h2>Останні сповіщення банку</h2>' + (last.length ? last.slice(0, 8).map(x => { const r = parseBankPush(x.text); return '<div class="srow ' + (r && r.amount ? 'bys' : '') + '"><span class="et"><b>' + (r && r.amount ? fmt(r.amount) + ' → ' + esc(CAT[r.cat].name) : 'не витрата') + '</b><small>' + esc(x.text) + ' · ' + stDate(x.at) + '</small></span></div>'; }).join('') : '<div class="small muted">Ще не було. Зроби оплату — тут з\'явиться, що прийшло і як розпізналось.</div>') + '</section>' +
+    '<section class="card"><h2>Останні сповіщення банку</h2>' + (last.length ? last.slice(0, 8).map(x => { const t0 = num(x.at), at = t0 > 1e12 ? t0 : t0 > 1e9 ? t0 * 1000 : Date.now(), lab = classifyPush(x.text, me, at); return '<div class="srow ' + (/не враховано|не дохід/.test(lab) ? '' : 'bys') + '"><span class="et"><b>' + lab + '</b><small>' + esc(x.text) + ' · ' + stDate(x.at) + '</small></span></div>'; }).join('') : '<div class="small muted">Ще не було. Зроби оплату — тут з\'явиться, що прийшло і як розпізналось.</div>') + '</section>' +
     '<button class="btn ghost" data-act="n_upd" style="width:100%">Перевірити оновлення застосунку</button></div>';
 }
 window.__nativeResume = () => { if (st.screen === 'auto') render(); };
@@ -1416,7 +1430,9 @@ function parseIncome(raw, who, at0) {
   const acc = [...raw.matchAll(/РАХУН[А-ЯІЇЄа-яіїє]*\s*(?:№\s*)?(?:UA)?\d*(\d{4})(?:\.\d{3})?\b/gi)].map(z => z[1]);
   refs.push(...acc);
   const cards = famCards(), byL4 = l => cards.find(c => c.last4 === l || c.acct === l);
-  const card = refs.map(byL4).find(Boolean) || null;
+  let card = refs.map(byL4).find(Boolean) || null;
+  // формат Маїсу (Укргазбанк): «зараховано … заробітна плата/інші виплати» — якщо картку/рахунок не впізнали
+  if (!card && /ЗАРАХОВАН[^]*ЗАРОБІТНА ПЛАТА\s*\/\s*ІНШІ ВИПЛАТИ/.test(raw.toUpperCase())) card = cards.find(c => c.role === 'pay_ms') || null;
   const pension = /ПЕНСІ|ПФУ|ПЕНСІЙН/.test(U) || (card && card.role === 'pension');
   const payCard = card && /^pay_/.test(card.role || '');
   if (!words && !payCard && !pension) return null;
