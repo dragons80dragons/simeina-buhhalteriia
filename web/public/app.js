@@ -192,7 +192,9 @@ const listsRef = () => doc(db, 'families', fid, 'lists', 'main');
 let unsubLists = null;
 function subscribeLists() {
   if (unsubLists) unsubLists();
-  unsubLists = onSnapshot(listsRef(), snap => { st.lists = snap.data() || {}; try { if (NATIVE && window.Android.setCards) window.Android.setCards(famCards().flatMap(c => [c.last4, c.acct]).filter(Boolean).join(',')); } catch (e) {} checkAlarms(); if (st.tab === 'lists') render(); }, () => {});
+  let devSent = false;
+  unsubLists = onSnapshot(listsRef(), snap => { st.lists = snap.data() || {};
+    if (NATIVE && !devSent) { devSent = true; try { saveLists({ dev: { [me]: { apk: String(window.Android.version()), at: Date.now(), notif: !!window.Android.notifAccess(), cards: !!window.Android.setCards } } }); } catch (e) {} } try { if (NATIVE && window.Android.setCards) window.Android.setCards(famCards().flatMap(c => [c.last4, c.acct]).filter(Boolean).join(',')); } catch (e) {} checkAlarms(); if (st.tab === 'lists') render(); }, () => {});
 }
 const saveLists = patch => setDoc(listsRef(), patch, { merge: true }).catch(e => alert('Не збережено: ' + e.message));
 const save = patch => setDoc(monthRef(), patch, { merge: true }).catch(e => alert('Не збережено: ' + e.message));
@@ -710,7 +712,7 @@ function parseBankPush(text) {
   const raw = String(text || '').replace(/\s+/g, ' ').trim();
   const U = raw.toUpperCase();
   if (!raw || /ТЕСТ АВТОЗАПИСУ/.test(U)) return { test: true };
-  if (/ЗАРАХУВАН|ПОПОВНЕН|НАДХОДЖЕН|ПЕРЕКАЗ|ПОВЕРНЕНН|ВІДМОВ|НЕВДАЛ|ВІДХИЛЕН|КОД ПІДТВЕРДЖ|ПАРОЛ|OTP|КЕШБЕК|CASHBACK|REFUND/.test(U)) return null;
+  if (/ЗАПИТУ[ЄЕ] ОПЛАТ|ЗАПИТ НА ОПЛАТ|ЗАРАХУВАН|ЗАРАХОВАН|ПОПОВНЕН|НАДХОДЖЕН|ПЕРЕКАЗ|ПОВЕРНЕНН|ВІДМОВ|НЕВДАЛ|ВІДХИЛЕН|КОД ПІДТВЕРДЖ|ПАРОЛ|OTP|КЕШБЕК|CASHBACK|REFUND/.test(U)) return null;
   // 1) Google Гаманець: «SRIBLIANKA KASA 1 566,80 грн – Visa PrivatBank ••1043»
   const tail = '\\s*(?:грн|UAH|₴)\\s*[–—-]\\s*(?:Visa|Master\\s?card|Maestro|Мастеркард|Віза)';
   const t1 = String(text || '').replace(/[\r\n]+/g, ' ').trim();
@@ -797,6 +799,10 @@ async function handleInbox1(id, x) {
       }
     }
     await deleteDoc(doc(db, 'families', fid, 'inbox', id));
+    // журнал для діагностики: що прийшло і як розпізналось (останні 40)
+    const res = inc ? (inc.ignore ? 'income-ignore' : 'income ' + (inc.slot || 'ask') + ' ' + inc.month) : tr ? (tr.transfer ? 'transfer' : 'transfer-ignore') : r ? (r.test ? 'test' : 'exp ' + r.cat) : 'ignored';
+    const bl = st.lists.blog || {}, old = Object.keys(bl).sort((a, b) => (bl[a].at || 0) - (bl[b].at || 0)).slice(0, Math.max(0, Object.keys(bl).length - 39));
+    saveLists({ blog: { ['b' + id]: { who, at, text: String(x.text || '').slice(0, 300), res }, ...Object.fromEntries(old.map(k => [k, deleteField()])) } });
   } catch (e) { handledInbox.delete(id); }
 }
 function toast(msg) {

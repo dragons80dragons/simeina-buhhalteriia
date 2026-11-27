@@ -17,6 +17,13 @@ public class PayListener extends NotificationListenerService {
         return p.contains("messaging") || p.contains(".mms") || p.equals("com.android.mms") || p.contains("sms");
     }
 
+    static String cyr(String s) {
+        StringBuilder b = new StringBuilder(s.length());
+        String lat = "aeiopcxy", cy = "аеіорсху";
+        for (int i = 0; i < s.length(); i++) { char ch = s.charAt(i); int k = lat.indexOf(ch); b.append(k >= 0 ? cy.charAt(k) : ch); }
+        return b.toString();
+    }
+
     @Override public void onListenerConnected() {
         new Thread(() -> Net.flush(getApplicationContext())).start();
     }
@@ -42,7 +49,11 @@ public class PayListener extends NotificationListenerService {
                 if (!money) return;
                 boolean card = false;
                 for (String c : Store.p(this).getString("cards", "").split(",")) if (c.length() == 4 && text.contains(c)) card = true;
-                if (!card) return;
+                // або SMS від банку / про зарахування (банки інколи пишуть латинськими a, i, o)
+                String low = text.toLowerCase() + " " + cyr(text.toLowerCase());
+                boolean bankSms = title != null && (title.toString().toLowerCase() + " " + cyr(title.toString().toLowerCase())).matches("(?s).*(bank|банк|ugb|ukrgas|укргаз|privat|приват|mono|oschad|ощад|pumb|пумб|raiffeisen|райф|sense|abank|izibank).*");
+                boolean incWords = low.matches("(?s).*(зарахован|зарахуван|надійшл|надходжен|зарплат|заробітн|аванс|пенсі|рахун|картк|card).*");
+                if (!card && !bankSms && !incWords) return;
             }
             if (Store.seen(this, pkg + "|" + text)) return;   // те саме сповіщення оновилось — не дублюємо
             long at = sbn.getPostTime() / 1000;
