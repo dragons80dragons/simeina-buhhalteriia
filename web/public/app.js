@@ -677,7 +677,7 @@ const INBOX_URL = 'https://firestore.googleapis.com/v1/projects/' + firebaseConf
 const inboxBody = w => '{"fields":{"who":{"stringValue":"' + w + '"},"at":{"stringValue":"[system_time]"},"text":{"stringValue":"[not_title] [notification]"}}}';
 const MORE_STORES = [
   [/ПРОСТОР|PROSTOR|EVA|ЕВА|WATSONS|DNIPRO-M|ДНІПРО-М|JYSK|IKEA|ЛЕРУА|LEROY|НОВА ЛІНІЯ|NOVA LINIYA|ФОКСМАРТ|ФОКС/, 'home'],
-  [/NOVA ?POSHTA|НОВА ПОШТА|УКРПОШТА|UKRPOSHTA|MEEST|UKLON|УКЛОН|BOLT|UBER|ТАКСІ|TAXI|УКРЗАЛІЗНИЦ|UZ\.GOV|ПАРКУВ|PARKING|ANP|AMIC|SHELL/, 'transport'],
+  [/NOVA ?POSHTA|NOVA ?PAY|НОВА ПОШТА|НОВАПЕЙ|НОВА ПЕЙ|УКРПОШТА|UKRPOSHTA|MEEST|UKLON|УКЛОН|BOLT|UBER|ТАКСІ|TAXI|УКРЗАЛІЗНИЦ|UZ\.GOV|ПАРКУВ|PARKING|ANP|AMIC|SHELL/, 'transport'],
   [/APTEKA|АПТЕКА|ДОБРОГО ДНЯ|ЗНАХІДКА|ГАЛИЧФАРМ|BAJADERA|LIKARNYA|ЛІКАРН|CLINIC|КЛІНІК|СТОМАТ|DENT/, 'health'],
   [/GLOVO|BOLT FOOD|RAKETA|SUSHI|СУШІ|BURGER|БУРГЕР|STARBUCKS|AROMA|LVIV CROISSANTS|ЛЬВІВСЬКІ КРУАСАНИ|ПІЦЕРІЯ|PIZZERIA|DOMINOS|BAR\b|БАР\b|PUB|ПАБ/, 'cafe'],
   [/КНИГ|BOOK|YAKABOO|ЯКАБУ|SCHOOL|ШКОЛ|COURSERA|UDEMY|PROMETHEUS/, 'kids'],
@@ -737,11 +737,13 @@ function parseBankPush(text) {
   if (!(amount > 0) || sign === '+') return null;
   if (!sign && !/ОПЛАТ|ПОКУПК|СПИСАН|PURCHASE|PAYMENT|POS|ТРАНЗАКЦ/.test(U)) return null;
   const rest = raw.replace(/(БАЛ\.?|БАЛАНС|ДОСТУПНО|ЗАЛИШОК)[^]*$/i, '').replace(AMT, ' ')
-    .replace(/\*\d{2,4}|••\d{4}|\d{2}[.:]\d{2}([.:]\d{2,4})?|PRIVAT24:?|ПРИВАТ24:?|ПРИВАТБАНК|PRIVATBANK|КАРТК[АИ]|ОПЛАТА|ПОКУПКА|СПИСАННЯ|УСПІШН\w*|ЧЕРЕЗ|GOOGLE PAY|APPLE PAY|NFC|З КАРТИ|КАРТИ/gi, ' ');
+    .replace(/\d?\*\d{2,4}|••\d{4}|\d{2}[.:]\d{2}([.:]\d{2,4})?|PRIVAT24:?|ПРИВАТ24:?|ПРИВАТБАНК|PRIVATBANK|КАРТК[АИ]|ОПЛАТА|ПОКУПКА|СПИСАННЯ|УСПІШН\w*|ЧЕРЕЗ|GOOGLE PAY|APPLE PAY|NFC|З КАРТИ|КАРТИ/gi, ' ');
   const parts = rest.split(/[.;:|\n]/).map(z => z.replace(/\s+/g, ' ').trim()).filter(z => (z.match(/[A-Za-zА-Яа-яІіЇїЄєҐґ]/g) || []).length >= 3);
   let cat = '', catWord = '';
   for (const p2 of parts) { for (const [r2, c] of PRIVAT_CATS) if (r2.test(p2.toUpperCase())) { cat = c; catWord = p2; break; } if (cat) break; }
-  const shopPart = parts.find(z => z !== catWord) || '';
+  // загальні назви розділів Привату («Послуги. NovaPay») — це не магазин
+  const GENERIC = /^(ПОСЛУГИ|ІНШЕ|РІЗНЕ|ПОКУПКИ|ІНШІ ВИТРАТИ|ОПЛАТА ПОСЛУГ|СЕРВІСИ|ТОВАРИ)$/i;
+  const shopPart = parts.find(z => z !== catWord && !GENERIC.test(z.trim())) || '';
   const c2 = catByShop(raw);
   if (!cat) cat = c2.cat;
   const note = tidyShop(shopPart) || c2.store || catWord || 'Оплата карткою';
@@ -1418,7 +1420,7 @@ const monthWord = m => NAMES[parseInt(m.slice(5), 10) - 1];
 function parseIncome(raw, who, at0) {
   raw = deLat(raw);
   const U = raw.toUpperCase().replace(/ЗАРОБІТНА ПЛАТА\s*\/\s*ІНШІ ВИПЛАТИ/g, 'НАДХОДЖЕННЯ');
-  const words = /ЗАРАХУВАН|НАДХОДЖ|ЗАРПЛАТ|ЗАР\.?\s?ПЛАТ|АВАНС|ПЕНСІ|ПФУ|ВИПЛАТ|ПРЕМІ|ЗАРОБІТН/.test(U);
+  const words = /ЗАРАХУВАН|ЗАРАХОВАН|НАДХОДЖ|ЗАРПЛАТ|ЗАР\.?\s?ПЛАТ|АВАНС|ПЕНСІ|ПФУ|ВИПЛАТ|ПРЕМІ|ЗАРОБІТН/.test(U);
   let amount = 0, sign = '', m; AMT.lastIndex = 0;
   while ((m = AMT.exec(raw))) {
     const before = raw.slice(Math.max(0, m.index - 14), m.index).toUpperCase();
@@ -1435,7 +1437,9 @@ function parseIncome(raw, who, at0) {
   if (!card && /ЗАРАХОВАН[^]*ЗАРОБІТНА ПЛАТА\s*\/\s*ІНШІ ВИПЛАТИ/.test(raw.toUpperCase())) card = cards.find(c => c.role === 'pay_ms') || null;
   const pension = /ПЕНСІ|ПФУ|ПЕНСІЙН/.test(U) || (card && card.role === 'pension');
   const payCard = card && /^pay_/.test(card.role || '');
-  if (!words && !payCard && !pension) return null;
+  // оплата з Гаманця («NovaPay 188,08 грн – Visa PrivatBank ••1043») — це витрата, не дохід
+  if (/(?:грн|UAH|₴)\s*[–—-]\s*(?:Visa|Master\s?card|Maestro)/i.test(raw)) return null;
+  if (!words && sign !== '+' && !(pension && /ПЕНСІ|ПФУ/.test(U))) return null;
   // поповнення з власної картки — не дохід
   if (refs.filter(r => !card || (r !== card.last4 && r !== card.acct)).some(r => byL4(r)) && !pension) return { ignore: true };
   if (/ПЕРЕКАЗ/.test(U) && !payCard && !pension && !/ЗАРПЛАТ|АВАНС|ВИПЛАТ|ПРЕМІ/.test(U)) return null; // звичайний переказ — інша гілка
