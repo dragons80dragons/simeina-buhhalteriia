@@ -869,8 +869,8 @@ async function handleInbox1(id, x) {
     if (inc && inc.income) await handleIncome(id, inc, at);
     else if (tr && tr.transfer) {
       const d = new Date(at), m = d.getFullYear() + '-' + pad(d.getMonth() + 1);
-      if (tr.incoming) await setDoc(doc(db, 'families', fid, 'months', m), { pin: { ['t' + id]: { who, amount: String(tr.amount), note: tr.note, at } } }, { merge: true });
-      else await setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['t' + id]: { who, cat: 'other', amount: String(tr.amount), note: tr.note, at, auto: true, src: 'privat', ask: true } } }, { merge: true });
+      if (tr.incoming) await setDoc(doc(db, 'families', fid, 'months', m), { pin: { ['t' + id]: { who, amount: String(tr.amount), note: tr.note, at, nk: tr.nk || '' } } }, { merge: true });
+      else await setDoc(doc(db, 'families', fid, 'months', m), { exp: { ['t' + id]: { who, cat: 'other', amount: String(tr.amount), note: tr.note, at, auto: true, src: 'privat', ask: true, nk: tr.nk || '' } } }, { merge: true });
     }
     else if (r && r.test) { if (who === me) toast('✅ Автозапис працює: запис дійшов до застосунку'); }
     else if (r) {
@@ -1276,8 +1276,11 @@ function parseTransfer(raw, who) {
   const other = refs.filter(r => !mine.includes(r));
   if (other.some(r => fam.includes(r))) return { ignore: true, internal: true };
   const incoming = sign === '+' || /ПЕРЕКАЗ ВІД|ЗАРАХУВАН|НАДХОДЖ|ОТРИМАН/.test(U);
-  const who2 = raw.replace(/(БАЛ\.?|БАЛАНС|ДОСТУПНО|ЗАЛИШОК)[^]*$/i, '').replace(AMT, ' ').replace(/PRIVAT24:?|ПРИВАТ24:?|ПЕРЕКАЗ\w*|НА КАРТКУ|З КАРТКИ|(?<![А-ЯІЇЄҐA-Zа-яіїєґa-z])(?:ВІД|НА)(?![А-ЯІЇЄҐA-Zа-яіїєґa-z])|\*+\s?\d{4}|\d{4}\s?\*+\s?\d{4}|[•×]+\s?\d{4}/gi, ' ').replace(/[.:;,]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return { transfer: true, incoming, amount: Math.round(amount * 100) / 100, note: (incoming ? 'Переказ від ' : 'Переказ ') + (who2 || '').slice(0, 30) };
+  const who2 = raw.replace(/(БАЛ\.?|БАЛАНС|ДОСТУПНО|ЗАЛИШОК)[^]*$/i, '').replace(AMT, ' ').replace(/PRIVAT24:?|ПРИВАТ24:?|ПЕРЕКАЗ[А-ЯІЇЄҐа-яіїєґ]*|НА КАРТКУ|З КАРТКИ|(?<![А-ЯІЇЄҐA-Zа-яіїєґa-z])(?:ВІД|НА)(?![А-ЯІЇЄҐA-Zа-яіїєґa-z])|\*+\s?\d{4}|\d{4}\s?\*+\s?\d{4}|[•×]+\s?\d{4}|\d?\*\d{2,4}|\b\d{1,2}:\d{2}(?::\d{2})?\b/gi, ' ').replace(/[.:;,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // переказ на ім'я, яке вже позначали як «своє» (Приват пише лише «Перекази. Коломієць Д.», без номера картки)
+  const nk = mkey(who2), self = (st.lists.selfNames || {})[nk];
+  if (nk && self && self !== who) return { ignore: true, internal: true };
+  return { transfer: true, incoming, amount: Math.round(amount * 100) / 100, note: (incoming ? 'Переказ від ' : 'Переказ ') + (who2 || '').slice(0, 30), nk };
 }
 
 // --- запитання «що за витрата?» для записів, які потрапили в «Різне» ---
@@ -1304,6 +1307,9 @@ function maybeAsk() {
       setDoc(ref, { bonus: { ['p' + p.id]: { who: me, amount: String(p.e.amount), note: p.e.note || 'Вхідний переказ', at: p.e.at } }, pin: { [p.id]: deleteField() } }, { merge: true });
     });
     $sheet.querySelector('[data-ign]').addEventListener('click', () => { setDoc(ref, { pin: { [p.id]: deleteField() } }, { merge: true }); $sheet.innerHTML = ''; });
+    if (p.e.nk) $sheet.querySelector('[data-ign]').insertAdjacentHTML('afterend', '<button type="button" class="btn big ghost" data-self>↔ Це переказ від ' + (me === 's' ? 'Даші' : 'Сергія') + ' — запам\'ятати</button>');
+    const sb = $sheet.querySelector('[data-self]');
+    if (sb) sb.addEventListener('click', () => { setDoc(ref, { pin: { [p.id]: deleteField() } }, { merge: true }); saveLists({ selfNames: { [p.e.nk]: me === 's' ? 'd' : 's' } }); $sheet.innerHTML = ''; toast('Запам\'ятав: перекази «' + p.e.nk + '» — між своїми'); });
     return;
   }
   let cat = '';
@@ -1312,6 +1318,7 @@ function maybeAsk() {
     '<div class="small muted">Автозапис не впізнав статтю. Вибери — і наступного разу ' + (p.e.mkey ? 'цей магазин' : 'такий запис') + ' піде туди сам.</div>' +
     catChips('', '') +
     '<label class="f">Уточнити опис (необов\'язково)<input class="note" value="' + esc(p.e.note || '') + '"></label>' +
+    (p.e.nk ? '<button type="button" class="btn big ghost" data-self>↔ Це переказ ' + (me === 's' ? 'Даші' : 'Сергію') + ' — не витрата</button>' : '') +
     '<button class="btn big" data-save>Зберегти</button><button type="button" class="btn ghost" data-keep>Залишити в «Різне»</button>', ov => {
     if (!cat) { ov.querySelector('.chips').classList.add('need'); return false; }
     const note = ov.querySelector('input.note').value.trim();
@@ -1323,15 +1330,22 @@ function maybeAsk() {
   const ov = $sheet.firstChild;
   wireChips(ov, c => { cat = c; });
   ov.querySelector('[data-keep]').addEventListener('click', () => { setDoc(ref, { exp: { [p.id]: { ask: deleteField() } } }, { merge: true }); $sheet.innerHTML = ''; });
+  const sb = ov.querySelector('[data-self]');
+  if (sb) sb.addEventListener('click', () => { setDoc(ref, { exp: { [p.id]: deleteField() } }, { merge: true }); saveLists({ selfNames: { [p.e.nk]: me === 's' ? 'd' : 's' } }); $sheet.innerHTML = ''; toast('Запам\'ятав: перекази «' + p.e.nk + '» — між своїми'); });
 }
 
 // --- картки сім'ї (у налаштуваннях автозапису) ---
+function selfNamesRows() {
+  const n = Object.entries(st.lists.selfNames || {}).filter(([, v]) => v);
+  if (!n.length) return '';
+  return '<div class="small muted" style="margin-top:10px">Перекази на ці імена — між своїми, не записуються:</div><div class="shist">' + n.map(([k, v]) => '<div class="srow ' + (v === 'd' ? 'byd' : 'bys') + '"><span class="et"><b>' + esc(k) + ' — ' + (v === 'd' ? 'Даша' : 'Сергій') + '</b></span><button type="button" class="ibtn del" data-act="sndel" data-k="' + esc(k) + '" aria-label="Видалити">✕</button></div>').join('') + '</div>';
+}
 function cardsSection() {
   const rows = famCards().map(c => '<div class="srow ' + (c.owner === 'd' ? 'byd' : c.owner === 's' ? 'bys' : '') + '"><span class="et"><b class="num">•• ' + esc(c.last4) + ' — ' + esc(cardOwner(c)) + '</b><small>' + esc([c.note, c.acct ? 'рахунок …' + c.acct : '', (CARD_ROLES.find(r => r[0] === (c.role || '')) || ['', ''])[1]].filter(Boolean).join(' · ') || 'картка') + '</small></span>' +
     '<button type="button" class="ibtn del" data-act="cdel" data-cid="' + esc(c.id) + '" aria-label="Видалити">✕</button></div>').join('');
   return '<section class="card"><div class="vhead"><span class="si">💳</span><span class="sc"><b>Картки нашої сім\'ї</b><small>Перекази між цими картками не записуються. Зарплата/аванс на картку «Виплати …» і пенсія записуються в прибутки самі (до 15 числа включно — з/п за минулий місяць, з 16-го — аванс поточного). Переказ стороннім — витрата з уточненням.</small></span></div>' +
     (rows ? '<div class="shist">' + rows + '</div>' : '<div class="small muted">Ще немає карток.</div>') +
-    '<button class="btn ghost" data-act="cadd" style="width:100%">+ Додати картку</button></section>';
+    '<button class="btn ghost" data-act="cadd" style="width:100%">+ Додати картку</button>' + selfNamesRows() + '</section>';
 }
 function openCardAdd() {
   let owner = me;
@@ -1831,6 +1845,7 @@ $app.addEventListener('click', e => {
   else if (t.dataset.sop) { st.sop = t.dataset.sop; render(); }
   else if (t.dataset.cv) { const g = t.parentNode; g.querySelectorAll('.cchip').forEach(z => z.classList.toggle('on', z === t)); st['s' + g.dataset.cg] = t.dataset.cv; updStashForm(); }
   else if (t.dataset.act === 'sdo') stashDo();
+  else if (t.dataset.act === 'sndel') { saveLists({ selfNames: { [t.dataset.k]: deleteField() } }); setTimeout(render, 400); }
   else if (t.dataset.act === 'autoset') { st.screen = 'auto'; render(); window.scrollTo(0, 0); }
   else if (t.dataset.copy) { const v = $app.querySelector('#' + t.dataset.copy).textContent; (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(() => { t.textContent = '✓ Скопійовано'; setTimeout(() => { t.textContent = 'Копіювати'; }, 1500); }).catch(() => { const r = document.createRange(); r.selectNodeContents($app.querySelector('#' + t.dataset.copy)); getSelection().removeAllRanges(); getSelection().addRange(r); }); }
   else if (t.dataset.act === 'autotest') autoTest(t);
