@@ -761,11 +761,20 @@ function handleInbox(id, x) { inboxChain = inboxChain.then(() => handleInbox1(id
 // банки інколи пишуть латинськими a/i/o всередині українських слів («зaрaховaно») — повертаємо кирилицю
 const LAT2CYR = { a: 'а', e: 'е', i: 'і', o: 'о', p: 'р', c: 'с', x: 'х', y: 'у', A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', I: 'І', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х' };
 const deLat = t => String(t).replace(/[A-Za-zА-Яа-яІіЇїЄєҐґ']+/g, w => /[А-Яа-яІіЇїЄєҐґ]/.test(w) ? w.replace(/[aeiopcxyABCEHIKMOPTX]/g, ch => LAT2CYR[ch]) : w);
+// SMS повністю латиницею («Na Vash rahunok … zarahovano … UAH») → кирилиця
+const TL = [['shch', 'щ'], ['zh', 'ж'], ['kh', 'х'], ['ts', 'ц'], ['ch', 'ч'], ['sh', 'ш'], ['ya', 'я'], ['yu', 'ю'], ['ye', 'є'], ['yi', 'ї'], ['ia', 'я'], ['iu', 'ю'], ['ie', 'є'],
+  ['a', 'а'], ['b', 'б'], ['v', 'в'], ['h', 'х'], ['g', 'г'], ['d', 'д'], ['e', 'е'], ['z', 'з'], ['y', 'и'], ['i', 'і'], ['j', 'й'], ['k', 'к'], ['l', 'л'], ['m', 'м'], ['n', 'н'], ['o', 'о'], ['p', 'п'], ['r', 'р'], ['s', 'с'], ['t', 'т'], ['u', 'у'], ['f', 'ф'], ['c', 'ц'], ['w', 'в'], ['x', 'кс'], ['q', 'к']];
+const translitUa = t => /[А-Яа-яІіЇїЄєҐґ]/.test(t) ? t : String(t).replace(/[A-Za-z]+/g, w => {
+  if (/^(UAH|USD|EUR|PLN|GBP|VISA|MASTERCARD|MC|PIN|OTP|SMS|ATM|POS|ID)$/i.test(w) || (w.length > 1 && w === w.toUpperCase() && !/[aeiouy]/i.test(w))) return w;
+  let lw = w.toLowerCase(), o = '';
+  for (let i = 0; i < lw.length;) { const m = TL.find(([a]) => lw.startsWith(a, i)); if (m) { o += m[1]; i += m[0].length; } else { o += lw[i]; i++; } }
+  return w[0] === w[0].toUpperCase() ? o[0].toUpperCase() + o.slice(1) : o;
+});
 async function handleInbox1(id, x) {
   if (handledInbox.has(id)) return; handledInbox.add(id);
   let at = num(x.at); at = at > 1e12 ? at : at > 1e9 ? at * 1000 : Date.now();
   const who = x.who === 'd' ? 'd' : 's';
-  const norm = deLat(String(x.text || '')).replace(/\s+/g, ' ').trim();
+  const norm = translitUa(deLat(String(x.text || ''))).replace(/\s+/g, ' ').trim();
   const inc = parseIncome(norm, who, at);
   const tr = inc ? null : parseTransfer(norm, who);
   const r = inc || tr ? null : parseBankPush(deLat(String(x.text || '')));
